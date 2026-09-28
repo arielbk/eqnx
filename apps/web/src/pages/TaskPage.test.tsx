@@ -1692,6 +1692,77 @@ test("TaskTimelineView Archive menu item calls onArchive handler on click", asyn
   await waitFor(() => expect(onArchive).toHaveBeenCalledTimes(1));
 });
 
+test("TaskTimelineView offers archiving a task that looks done, acting only on click", async () => {
+  const user = userEvent.setup();
+  const onArchive = vi.fn().mockResolvedValue(undefined);
+  const onDismiss = vi.fn().mockResolvedValue(undefined);
+  const timeline = { ...baseTimeline(), archiveSuggested: true as const };
+  render(
+    <MemoryRouter>
+      <TaskTimelineView
+        timeline={timeline}
+        onArchive={onArchive}
+        onDismissArchiveSuggestion={onDismiss}
+      />
+    </MemoryRouter>,
+  );
+
+  const suggestion = screen.getByTestId("archive-suggestion");
+  expect(suggestion).toHaveTextContent("Looks done");
+  expect(onArchive).not.toHaveBeenCalled();
+
+  await user.click(
+    within(suggestion).getByRole("button", { name: "Archive task (looks done)" }),
+  );
+  await waitFor(() => expect(onArchive).toHaveBeenCalledTimes(1));
+  expect(onDismiss).not.toHaveBeenCalled();
+});
+
+test("TaskTimelineView dismisses the archive suggestion without archiving", async () => {
+  const user = userEvent.setup();
+  const onArchive = vi.fn();
+  const onDismiss = vi.fn().mockResolvedValue(undefined);
+  const timeline = { ...baseTimeline(), archiveSuggested: true as const };
+  render(
+    <MemoryRouter>
+      <TaskTimelineView
+        timeline={timeline}
+        onArchive={onArchive}
+        onDismissArchiveSuggestion={onDismiss}
+      />
+    </MemoryRouter>,
+  );
+
+  await user.click(
+    screen.getByRole("button", { name: "Dismiss archive suggestion" }),
+  );
+  await waitFor(() => expect(onDismiss).toHaveBeenCalledTimes(1));
+  expect(onArchive).not.toHaveBeenCalled();
+});
+
+test("TaskTimelineView shows no archive suggestion without the flag or once archived", () => {
+  const plain = renderToStaticMarkup(
+    <MemoryRouter>
+      <TaskTimelineView timeline={baseTimeline()} onArchive={() => {}} />
+    </MemoryRouter>,
+  );
+  expect(plain).not.toContain("archive-suggestion");
+
+  const archived = renderToStaticMarkup(
+    <MemoryRouter>
+      <TaskTimelineView
+        timeline={{
+          ...baseTimeline({ archivedAt: "2026-06-01T00:00:00.000Z" }),
+          archiveSuggested: true,
+        }}
+        onArchive={() => {}}
+        onUnarchive={() => {}}
+      />
+    </MemoryRouter>,
+  );
+  expect(archived).not.toContain("archive-suggestion");
+});
+
 test("TaskTimelineView Unarchive menu item calls onUnarchive handler on click", async () => {
   const user = userEvent.setup();
   const onUnarchive = vi.fn().mockResolvedValue(undefined);

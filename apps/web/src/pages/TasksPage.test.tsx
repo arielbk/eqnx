@@ -1446,3 +1446,157 @@ describe("TaskRow hover-swap", () => {
     );
   });
 });
+
+describe("TaskRow archive suggestion", () => {
+  const looksDone = () =>
+    summary({
+      id: "task-1",
+      slug: "cli-work",
+      title: "CLI work",
+      archiveSuggested: true,
+    });
+
+  test("a row that looks done offers archiving in place, without archiving", () => {
+    const onArchive = vi.fn();
+    render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[looksDone()]}
+          onArchive={onArchive}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Looks done")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Archive CLI work (looks done)" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Dismiss archive suggestion for CLI work",
+      }),
+    ).toBeVisible();
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  test("taking the suggestion archives through the row's usual settle window", async () => {
+    vi.useFakeTimers();
+    const onArchive = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[looksDone()]}
+          onArchive={onArchive}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Archive CLI work (looks done)" }),
+    );
+    expect(onArchive).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2200);
+
+    expect(onArchive).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "task-1" }),
+    );
+  });
+
+  test("dismissing reports the task and never archives it", () => {
+    const onArchive = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[looksDone()]}
+          onArchive={onArchive}
+          onDismissArchiveSuggestion={onDismiss}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Dismiss archive suggestion for CLI work",
+      }),
+    );
+
+    expect(onDismiss).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "task-1" }),
+    );
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  test("no suggestion shows without the flag, on archived rows, or read-only", () => {
+    const { rerender } = render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[summary({ id: "task-1", title: "CLI work" })]}
+          onArchive={vi.fn()}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("Looks done")).not.toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter>
+        <TaskList
+          tasks={[
+            summary({
+              id: "task-1",
+              title: "CLI work",
+              archiveSuggested: true,
+              archivedAt: "2026-01-01T00:00:00.000Z",
+            }),
+          ]}
+          onArchive={vi.fn()}
+          onUnarchive={vi.fn()}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("Looks done")).not.toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter>
+        <TaskList tasks={[looksDone()]} readOnly />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("Looks done")).not.toBeInTheDocument();
+  });
+
+  test("the tasks page POSTs a dismissal to the API", async () => {
+    const tasks = [looksDone()];
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(url === "/api/tasks" ? tasks : { id: "task-1" }),
+          { status: 200 },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TasksPage />, { wrapper: makeQueryWrapper() });
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Dismiss archive suggestion for CLI work",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks/cli-work/dismiss-archive-suggestion",
+        { method: "POST" },
+      ),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/tasks/cli-work/archive",
+      expect.anything(),
+    );
+  });
+});
