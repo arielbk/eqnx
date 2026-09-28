@@ -8,6 +8,7 @@ import {
 } from "@trace/core";
 import {
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -16,9 +17,11 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   parseAddDocOptions,
+  parsePromoteDocOptions,
+  promoteDocUsage,
   parseTaskCaptureArgs,
   parseTaskCreateArgs,
   parseTaskUpdateArgs,
@@ -352,6 +355,46 @@ export function taskUpdateDocOperation(
     const doc = store.updateTaskDoc(task.id, resolve(ctx.cwd, path), options);
     renderTaskDocManifest(store, databasePath, task);
     return success(formatTaskDocSummary(task.slug, doc));
+  });
+  if (result.exitCode === 0) (ctx.triggerSync ?? requestAutomaticSync)(ctx.env);
+  return result;
+}
+
+export function taskPromoteDocOperation(
+  rawArgs: string[],
+  ctx: CommandContext,
+): CommandResult {
+  if (isHelpFlag(rawArgs[0])) return success(`${promoteDocUsage()}\n`);
+  const taskId = rawArgs[0];
+  const path = rawArgs[1];
+
+  if (!taskId) return failure(promoteDocUsage());
+  if (!path) return failure(promoteDocUsage());
+
+  const optionsAttempt = attempt(() => parsePromoteDocOptions(rawArgs.slice(2)));
+  if (!optionsAttempt.ok) return optionsAttempt.result;
+  const options = optionsAttempt.value;
+
+  const result = withStore(ctx.env, (store, databasePath) => {
+    const task = store.getTaskByRef(taskId);
+    if (!task) return failure(`Task not found: ${taskId}`, 1);
+    // A path that names a file from here is taken as given; otherwise it is
+    // read as a name inside the task's docs dir, which is where promotable
+    // docs live.
+    const fromCwd = resolve(ctx.cwd, path);
+    const docPath = isAbsolute(path) || existsSync(fromCwd) ? fromCwd : path;
+    const promotedAttempt = attempt(
+      () => store.promoteTaskDoc(task.id, docPath, options),
+      1,
+    );
+    if (!promotedAttempt.ok) return promotedAttempt.result;
+    const doc = promotedAttempt.value;
+    renderTaskDocManifest(store, databasePath, task);
+    return {
+      exitCode: 0,
+      stdout: formatTaskDocSummary(task.slug, doc),
+      stderr: `Promoted to ${doc.promoted?.repoPath ?? doc.path} in the project repo; the task keeps a pointer to it.\n`,
+    };
   });
   if (result.exitCode === 0) (ctx.triggerSync ?? requestAutomaticSync)(ctx.env);
   return result;

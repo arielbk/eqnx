@@ -171,7 +171,11 @@ export function formatReEntryManifest(manifest: ReEntryManifest): string {
       ...manifest.docs.flatMap((doc) => [
         `- title: ${doc.title}`,
         ...(doc.description ? [`  description: ${doc.description}`] : []),
-        `  path: ${doc.path}`,
+        // A promoted doc lives in the project repo; its checkout may not be
+        // on this machine (or on this branch), so say so rather than hand an
+        // agent a path that will not open.
+        `  path: ${doc.path}${doc.promoted?.missing ? " (not on this machine)" : ""}`,
+        ...(doc.promoted ? [`  inRepo: ${doc.promoted.repoPath}`] : []),
       ]),
     );
   }

@@ -238,3 +238,34 @@ test("taskNotFoundMessage includes near candidates when they match the ref", () 
 test("taskNotFoundMessage omits near candidates when none match", () => {
   expect(taskNotFoundMessage([task], "missing")).toBe("Task not found: missing");
 });
+
+test("formatReEntryManifest marks promoted docs as living in the repo", () => {
+  const manifest: ReEntryManifest = {
+    task: { id: "task-1", title: "Ship formatters", projectRoot: "/repo" },
+    taskDocsDir: "/trace/tasks/ship-formatters/docs",
+    docs: [
+      {
+        title: "Checkout PRD",
+        path: "/repo/docs/checkout.prd.md",
+        promoted: { repoPath: "docs/checkout.prd.md", missing: false },
+      },
+      {
+        title: "plan.md",
+        path: "/repo/docs/plan.md",
+        promoted: { repoPath: "docs/plan.md", missing: true },
+      },
+    ],
+  };
+
+  expect(formatReEntryManifest(manifest)).toContain(
+    [
+      "docs:",
+      "- title: Checkout PRD",
+      "  path: /repo/docs/checkout.prd.md",
+      "  inRepo: docs/checkout.prd.md",
+      "- title: plan.md",
+      "  path: /repo/docs/plan.md (not on this machine)",
+      "  inRepo: docs/plan.md",
+    ].join("\n"),
+  );
+});

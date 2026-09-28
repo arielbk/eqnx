@@ -111,6 +111,24 @@ export type TaskDoc = {
   // Optional one-line description; absent on docs registered without one. It is
   // the source of truth the state.md manifest footer renders from.
   description?: string;
+  // Present when the doc was promoted into the project repo: `path` is then
+  // the repo file (resolved on this machine), and the pointer left in the
+  // task's docs dir is what keeps it listed and what sync carries.
+  promoted?: PromotedDoc;
+};
+
+export type PromotedDoc = {
+  /** Where the doc lives, relative to the project root, POSIX-separated. */
+  repoPath: string;
+  /** The pointer file in the task's docs dir. */
+  pointerPath: string;
+  /** The repo file is not on this machine (not pulled, other branch, no checkout). */
+  missing: boolean;
+};
+
+export type PromoteTaskDocOptions = {
+  /** Target relative to the project root; a trailing slash means a directory. Defaults to `docs/`. */
+  to?: string;
 };
 
 // Optional metadata captured alongside a doc registration. Both fields are
@@ -240,6 +258,7 @@ export type ReEntryManifestDoc = {
   path: string;
   title: string;
   description?: string;
+  promoted?: Pick<PromotedDoc, "repoPath" | "missing">;
 };
 
 // The one session pointer the manifest carries: the latest session associated
@@ -344,6 +363,12 @@ export type TaskStore = {
     options: UpdateTaskDocOptions,
   ): TaskDoc;
   listDocsForTask(taskId: string): TaskDoc[];
+  // Move a task doc into the project repo and leave a pointer in its place.
+  promoteTaskDoc(
+    taskId: string,
+    path: string,
+    options?: PromoteTaskDocOptions,
+  ): TaskDoc;
   removeTaskDoc(taskId: string, path: string): void;
   syncSnapshot(): SyncPayload;
   /**

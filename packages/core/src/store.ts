@@ -22,6 +22,7 @@ import {
   looksLikeTaskId,
   slugify,
 } from "./slug.ts";
+import { promoteDocFile } from "./doc-pointer.ts";
 import {
   listNativeTaskDocs,
   mergeTaskDocs,
@@ -49,6 +50,7 @@ import type {
   ActiveTask,
   AddTaskDocOptions,
   GitWorkContext,
+  PromoteTaskDocOptions,
   Project,
   ProjectMergeResult,
   ProjectResolution,
@@ -1233,7 +1235,7 @@ class NodeSqliteTaskStore implements TaskStore {
     const task = this.getTaskByRef(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
-    const normalizedPath = path.trim();
+    const normalizedPath = this.#canonicalDocPath(task, path.trim());
     if (normalizedPath.length === 0) {
       throw new Error("Task doc path is required");
     }
@@ -1276,7 +1278,7 @@ class NodeSqliteTaskStore implements TaskStore {
     const task = this.getTaskByRef(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
-    const normalizedPath = path.trim();
+    const normalizedPath = this.#canonicalDocPath(task, path.trim());
     if (normalizedPath.length === 0) {
       throw new Error("Task doc path is required");
     }
@@ -1349,11 +1351,56 @@ class NodeSqliteTaskStore implements TaskStore {
 
     return mergeTaskDocs(
       registeredDocs,
-      task?.slug ? listNativeTaskDocs(this.#databasePath, id, task.slug) : [],
+      task?.slug
+        ? listNativeTaskDocs(
+            this.#databasePath,
+            id,
+            task.slug,
+            this.#projectRootsForTask(task),
+          )
+        : [],
       task?.slug
         ? resolveTaskDocsDir(this.#databasePath, task.slug)
         : undefined,
     );
+  }
+
+  promoteTaskDoc(
+    taskId: string,
+    path: string,
+    options?: PromoteTaskDocOptions,
+  ): TaskDoc {
+    const task = this.getTaskByRef(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    if (!task.projectRoot) {
+      throw new Error(
+        `Task ${task.slug} has no project root to promote docs into`,
+      );
+    }
+
+    const docsDir = resolveTaskDocsDir(this.#databasePath, task.slug);
+    const docPath = resolve(docsDir, path.trim());
+    const { pointerPath } = promoteDocFile({
+      docsDir,
+      docPath,
+      projectRoot: task.projectRoot,
+      ...(options?.to === undefined ? {} : { to: options.to }),
+    });
+
+    // The metadata row follows the doc to its pointer, which is what lives in
+    // the docs dir and so what sync carries the title and description with.
+    const row = this.getTaskDoc(task.id, docPath);
+    if (row) {
+      this.#sqlite
+        .prepare("UPDATE OR REPLACE task_docs SET path = ? WHERE task_id = ? AND path = ?")
+        .run(pointerPath, task.id, docPath);
+    }
+
+    const promoted = this.listDocsForTask(task.id).find(
+      (doc) => doc.promoted?.pointerPath === pointerPath,
+    );
+    if (!promoted) throw new Error(`Promoted doc did not list: ${pointerPath}`);
+    return promoted;
   }
 
   removeTaskDoc(taskId: string, path: string): void {
@@ -2031,6 +2078,34 @@ class NodeSqliteTaskStore implements TaskStore {
     return lines.join("\n");
   }
 
+  // Where a promoted doc can be on this machine: the root the task was
+  // stamped with (which may be another machine's path after a sync) and then
+  // every root this machine has recorded for the same project.
+  #projectRootsForTask(task: Task): string[] {
+    const known = task.projectId
+      ? (
+          this.#sqlite
+            .prepare(
+              `SELECT root_path FROM project_roots
+               WHERE project_id = ?
+               ORDER BY created_at ASC, root_path ASC`,
+            )
+            .all(task.projectId) as { root_path: string }[]
+        ).map((row) => row.root_path)
+      : [];
+    return [...new Set([task.projectRoot, ...known].filter(Boolean))];
+  }
+
+  // A promoted doc is addressed by the repo path it lists as, but its row
+  // belongs on the pointer so its title and description sync with it.
+  #canonicalDocPath(task: Task, path: string): string {
+    if (path.length === 0) return path;
+    const promoted = this.listDocsForTask(task.id).find(
+      (doc) => doc.promoted && doc.path === path,
+    );
+    return promoted?.promoted?.pointerPath ?? path;
+  }
+
   private getTaskDoc(taskId: string, path: string): TaskDoc | null {
     const row = this.#sqlite
       .prepare(
@@ -2333,6 +2408,14 @@ function toManifestDoc(doc: TaskDoc): ReEntryManifestDoc {
     title: resolveDocTitle(doc, readDocContentOrNull(doc.path)),
     ...(doc.description ? { description: doc.description } : {}),
     path: doc.path,
+    ...(doc.promoted
+      ? {
+          promoted: {
+            repoPath: doc.promoted.repoPath,
+            missing: doc.promoted.missing,
+          },
+        }
+      : {}),
   };
 }
 
