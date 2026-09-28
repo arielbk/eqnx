@@ -71,7 +71,14 @@ type DocumentMetadata = {
 // Bridge to the store's task_docs rows, so registered doc titles and
 // descriptions travel inside the manifest rather than staying machine-local.
 export type DocMetadataAccessor = {
-  list(taskId: string): { path: string; title?: string; description?: string }[];
+  list(taskId: string): {
+    path: string;
+    title?: string;
+    description?: string;
+    // A promoted doc lists as its repo file; its labels ride with the
+    // pointer left in the docs dir.
+    promoted?: { pointerPath: string };
+  }[];
   update(
     taskId: string,
     path: string,
@@ -307,7 +314,8 @@ export class FileSystemDocumentStore implements SyncDocumentStore {
       if (doc.title === undefined && doc.description === undefined) continue;
       // Legacy rows may hold a bare relative path; resolve it the same way
       // the doc listing does before checking it lives inside the docs dir.
-      const absolute = isAbsolute(doc.path) ? doc.path : resolve(docsDir, doc.path);
+      const path = doc.promoted?.pointerPath ?? doc.path;
+      const absolute = isAbsolute(path) ? path : resolve(docsDir, path);
       const relativePath = relative(docsDir, absolute);
       if (relativePath.startsWith("..") || isAbsolute(relativePath)) continue;
       metadataByPath.set(relativePath.split(sep).join("/"), {

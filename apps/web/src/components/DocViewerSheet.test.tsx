@@ -26,6 +26,7 @@ function renderSheet(
   options: {
     knownDocPaths?: readonly string[];
     onNavigateDocRoute?: (route: string) => void;
+    promoted?: { repoPath: string; missing: boolean };
   } = {},
 ) {
   const triggerRef = createRef<HTMLElement>();
@@ -38,6 +39,7 @@ function renderSheet(
         triggerRef={triggerRef}
         onOpenChange={onOpenChange}
         onNavigateDocRoute={options.onNavigateDocRoute}
+        promoted={options.promoted}
       />
     </QueryClientProvider>,
   );
@@ -373,4 +375,34 @@ test("does not intercept unknown, external, or non-markdown links", async () => 
     expect(event.defaultPrevented).toBe(false);
   }
   expect(onNavigateDocRoute).not.toHaveBeenCalled();
+});
+
+test("says where a promoted doc lives in the repo", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response("<h1>Plan</h1>", { status: 200, headers: { "content-type": "text/html" } }),
+    ),
+  );
+
+  renderSheet("/work/docs/plan.md", () => {}, {
+    promoted: { repoPath: "docs/plan.md", missing: false },
+  });
+
+  expect(await screen.findByRole("heading", { name: "Plan" })).toBeInTheDocument();
+  expect(screen.getByTestId("doc-viewer-promoted")).toHaveTextContent(
+    "Lives in the project repo at docs/plan.md",
+  );
+});
+
+test("explains a promoted doc whose repo file is not on this machine", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+
+  renderSheet("/work/docs/plan.md", () => {}, {
+    promoted: { repoPath: "docs/plan.md", missing: true },
+  });
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This document was promoted to docs/plan.md in the project repo, and that file is not on this machine.",
+  );
 });

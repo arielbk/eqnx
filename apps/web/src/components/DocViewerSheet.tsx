@@ -24,6 +24,7 @@ export function DocViewerSheet({
   onOpenChange,
   onNavigateDocRoute,
   triggerRef,
+  promoted,
 }: {
   taskRef: string;
   docPath: string;
@@ -31,6 +32,8 @@ export function DocViewerSheet({
   onOpenChange: (open: boolean) => void;
   onNavigateDocRoute?: (route: string) => void;
   triggerRef: RefObject<HTMLElement | null>;
+  /** Set when the doc was promoted into the project repo. */
+  promoted?: { repoPath: string; missing: boolean };
 }) {
   const query = useDocContents(taskRef, docPath);
   const toggleCheckbox = useToggleCheckbox();
@@ -43,8 +46,18 @@ export function DocViewerSheet({
       description={`Read-only contents of ${docPath}`}
       returnFocusTo={triggerRef}
     >
+      {promoted ? (
+        <p
+          data-testid="doc-viewer-promoted"
+          className="m-0 mb-3 text-xs font-bold uppercase tracking-wide text-text-muted"
+        >
+          Lives in the project repo at{" "}
+          <span className="font-mono normal-case">{promoted.repoPath}</span>
+        </p>
+      ) : null}
       <DocViewerBody
         query={query}
+        promoted={promoted}
         onClick={(event) => {
           // First, so a code block nested in a task-list line copies instead of
           // toggling the line's checkbox.
@@ -89,9 +102,11 @@ export function DocViewerSheet({
 function DocViewerBody({
   query,
   onClick,
+  promoted,
 }: {
   query: UseQueryResult<DocContents, Error>;
   onClick?: (event: MouseEvent<HTMLDivElement>) => void;
+  promoted?: { repoPath: string; missing: boolean };
 }) {
   const proseRef = useRef<HTMLDivElement>(null);
   const html = query.data?.contentType.startsWith("text/html")
@@ -112,7 +127,7 @@ function DocViewerBody({
   if (query.isError) {
     return (
       <p role="alert" className="text-text-muted">
-        {docErrorMessage(query.error)}
+        {docErrorMessage(query.error, promoted)}
       </p>
     );
   }
@@ -251,8 +266,16 @@ function readCheckbox(
   return { input, index, checked };
 }
 
-function docErrorMessage(error: Error): string {
+function docErrorMessage(
+  error: Error,
+  promoted?: { repoPath: string },
+): string {
   if (error instanceof HttpError) {
+    if (error.status === 404 && promoted) {
+      // The pointer synced but the repo file did not: it arrives with the
+      // checkout (a pull, the right branch), not with EQNX.
+      return `This document was promoted to ${promoted.repoPath} in the project repo, and that file is not on this machine.`;
+    }
     if (error.status === 404) return "This document could not be found.";
     if (error.status === 400) {
       return "This document path is outside the task's docs directory.";

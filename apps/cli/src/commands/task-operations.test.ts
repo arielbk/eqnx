@@ -1,13 +1,14 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openTraceStore } from "@trace/core";
+import { openTraceStore, resolveTaskDocsDir } from "@trace/core";
 import { expect, test, vi } from "vitest";
 import {
   taskAddDocOperation,
   taskCaptureOperation,
   taskCreateOperation,
   taskListOperation,
+  taskPromoteDocOperation,
   taskShowOperation,
   taskUpdateDocOperation,
   taskUpdateOperation,
@@ -250,5 +251,79 @@ test("task show reports a missing ref with exit code 1", () => {
       stdout: "",
       stderr: "Task not found: missing\n",
     });
+  });
+});
+
+function seedPromotable(ctx: { env: Env; cwd: string; stdin: string }) {
+  const slug = taskCreateOperation(["Checkout flow"], ctx).stdout.trim();
+  const docsDir = resolveTaskDocsDir(ctx.env.TRACE_DB as string, slug);
+  mkdirSync(docsDir, { recursive: true });
+  const docPath = join(docsDir, "checkout.prd.md");
+  writeFileSync(docPath, "# Checkout PRD\n");
+  return { slug, docsDir, docPath };
+}
+
+test("task promote-doc moves a doc into the repo's docs dir and keeps it listed", () => {
+  withTempContext((ctx) => {
+    const { slug, docPath } = seedPromotable(ctx);
+    const triggerSync = vi.fn();
+
+    const result = taskPromoteDocOperation([slug, docPath], { ...ctx, triggerSync });
+
+    const target = join(ctx.cwd, "docs", "checkout.prd.md");
+    expect(result).toMatchObject({ exitCode: 0, stdout: `${slug}\t${target}\n` });
+    expect(result.stderr).toContain("docs/checkout.prd.md");
+    expect(readFileSync(target, "utf8")).toBe("# Checkout PRD\n");
+    expect(existsSync(docPath)).toBe(false);
+    expect(triggerSync).toHaveBeenCalledOnce();
+
+    // The state.md footer indexes the doc at its new home.
+    const shown = taskShowOperation([slug], ctx);
+    expect(shown.stdout).toContain(target);
+  });
+});
+
+test("task promote-doc takes the doc by its name in the docs dir and a --to path", () => {
+  withTempContext((ctx) => {
+    const { slug } = seedPromotable(ctx);
+
+    const result = taskPromoteDocOperation(
+      [slug, "checkout.prd.md", "--to", "specs/checkout.md"],
+      { ...ctx, triggerSync: vi.fn() },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(ctx.cwd, "specs", "checkout.md"), "utf8")).toBe(
+      "# Checkout PRD\n",
+    );
+  });
+});
+
+test("task promote-doc refuses to overwrite an existing repo file", () => {
+  withTempContext((ctx) => {
+    const { slug, docPath } = seedPromotable(ctx);
+    mkdirSync(join(ctx.cwd, "docs"));
+    writeFileSync(join(ctx.cwd, "docs", "checkout.prd.md"), "# Theirs\n");
+    const triggerSync = vi.fn();
+
+    const result = taskPromoteDocOperation([slug, docPath], { ...ctx, triggerSync });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("already exists");
+    expect(existsSync(docPath)).toBe(true);
+    expect(triggerSync).not.toHaveBeenCalled();
+  });
+});
+
+test("task promote-doc explains its usage", () => {
+  withTempContext((ctx) => {
+    expect(taskPromoteDocOperation([], ctx)).toMatchObject({ exitCode: 2 });
+    expect(taskPromoteDocOperation(["--help"], ctx).stdout).toContain(
+      "eqnx task promote-doc <ref> <path> [--to <repo-path>]",
+    );
+    const { slug, docPath } = seedPromotable(ctx);
+    expect(taskPromoteDocOperation([slug, docPath, "--bogus"], ctx).stderr).toContain(
+      "Unknown option: --bogus",
+    );
   });
 });

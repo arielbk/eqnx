@@ -321,8 +321,25 @@ export function TaskTimelineView({
     (item) => item.type === "session",
   ).length;
   const docCount = timeline.items.filter((item) => item.type === "doc").length;
-  const knownDocPaths = timeline.items.flatMap((item) =>
-    item.type === "doc" ? [item.doc.path] : [],
+  // A promoted doc lists as its repo file, outside the task docs dir. Its
+  // pointer (never a markdown link target) goes first so link resolution
+  // still anchors relative hrefs on the task docs dir.
+  const knownDocPaths = [
+    ...timeline.items.flatMap((item) =>
+      item.type === "doc" && item.doc.promoted
+        ? [item.doc.promoted.pointerPath]
+        : [],
+    ),
+    ...timeline.items.flatMap((item) =>
+      item.type === "doc" ? [item.doc.path] : [],
+    ),
+  ];
+  const promotedDocs = new Map(
+    timeline.items.flatMap((item) =>
+      item.type === "doc" && item.doc.promoted
+        ? [[item.doc.path, item.doc.promoted] as const]
+        : [],
+    ),
   );
 
   function navigateStateDocLink(event: MouseEvent<HTMLElement>) {
@@ -551,6 +568,17 @@ export function TaskTimelineView({
                             {formatBytes(item.sizeBytes)}
                           </span>
                         ) : null}
+                        {item.doc.promoted ? (
+                          <span
+                            title={`In the project repo at ${item.doc.promoted.repoPath}`}
+                            className="text-xs font-bold uppercase tracking-wide"
+                          >
+                            In repo
+                          </span>
+                        ) : null}
+                        {item.doc.promoted?.missing ? (
+                          <span className="text-xs">Not on this machine</span>
+                        ) : null}
                       </p>
                     </div>
                   </div>
@@ -567,6 +595,7 @@ export function TaskTimelineView({
             taskRef={timeline.task.slug}
             docPath={selectedDocPath}
             knownDocPaths={knownDocPaths}
+            promoted={promotedDocs.get(selectedDocPath)}
             triggerRef={docTriggerRef}
             onNavigateDocRoute={onNavigateDocRoute}
             onOpenChange={(open) => {

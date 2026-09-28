@@ -17,6 +17,15 @@ docs, and architecture reviews so names stay consistent.
   with a resolved title (explicit title → first H1 → filename), an optional
   recorded one-line description, and the path. An agent reads the index to
   decide what is worth opening, then follows the pointer on demand.
+- **Doc promotion** — moving a task document out of the task's docs directory
+  and into the project repo (`eqnx task promote-doc`, default `<repo>/docs/`).
+  It is a move, not a copy: the repo file becomes the one source of truth.
+- **Doc pointer** — what promotion leaves behind: `<name>.eqnx-pointer.json`
+  in the task's docs directory, holding the repo-relative path. The task still
+  lists the doc (document index, board) resolved through the pointer against
+  this machine's roots for the project. The pointer, not the body, is what doc
+  sync carries, so another machine lists the doc as *not on this machine*
+  until its checkout has the file.
 - **Last worked on** — historical Git context belonging to the most recent
   task-associated session that captured it: branch name, optional linked-worktree
   display label, and a machine-local absolute path that is not portable. It does

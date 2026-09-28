@@ -183,6 +183,27 @@ export function parseAddDocOptions(flags: string[]): {
   return { title, description };
 }
 
+export function promoteDocUsage(): string {
+  return "Usage: eqnx task promote-doc <ref> <path> [--to <repo-path>]\n\nMoves a task doc into the project repo (default: <repo>/docs/<name>) and leaves a pointer in the task, so the repo file is the one copy. --to is relative to the project root; end it with / to name a directory.";
+}
+
+export function parsePromoteDocOptions(flags: string[]): { to?: string } {
+  let to: string | undefined;
+  let index = 0;
+  while (index < flags.length) {
+    const flag = flags[index];
+    if (flag === "--to") {
+      const value = flags[index + 1];
+      if (!value) throw new Error(promoteDocUsage());
+      to = value;
+      index += 2;
+    } else {
+      throw new Error(`Unknown option: ${flag}`);
+    }
+  }
+  return to === undefined ? {} : { to };
+}
+
 export function updateDocUsage(): string {
   return "Usage: eqnx task update-doc <ref> <path> [--title <text>] [--description <text>]";
 }

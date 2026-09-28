@@ -1,4 +1,9 @@
 export { openTraceStore, resolveTaskDocsDir } from "./store.ts";
+export {
+  DOC_POINTER_SUFFIX,
+  isDocPointerPath,
+  parseDocPointer,
+} from "./doc-pointer.ts";
 export { compareSyncRows, synchronize } from "./sync.ts";
 export {
   createKeyWrapper,
@@ -182,6 +187,7 @@ export type { DocFingerprintInput, ProseStamp } from "./prose-fingerprint.ts";
 export type {
   ActiveTask,
   AddTaskDocOptions,
+  PromoteTaskDocOptions,
   ContextTokens,
   GitWorkContext,
   LastWorkedOn,
@@ -201,6 +207,7 @@ export type {
   StateAuthor,
   Task,
   TaskDoc,
+  PromotedDoc,
   TaskStore,
   TaskSummary,
   TaskTimeline,
