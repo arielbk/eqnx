@@ -2954,3 +2954,69 @@ describe("TaskPage", () => {
     });
   });
 });
+
+test("TaskTimelineView marks a promoted doc as living in the repo", () => {
+  const timeline: TaskTimeline = {
+    task: {
+      id: "task-1",
+      slug: "usable-v1",
+      title: "usable v1",
+      projectRoot: "/work/trace-v2",
+      projectId: "project-trace-v2",
+      projectSlug: "trace-v2",
+      createdAt: "2026-05-29T00:00:00.000Z",
+      archivedAt: null,
+      pinnedAt: null,
+    },
+    items: [
+      {
+        type: "doc",
+        createdAt: "2026-05-29T00:03:00.000Z",
+        doc: {
+          taskId: "task-1",
+          path: "/work/trace-v2/docs/plan.md",
+          createdAt: "2026-05-29T00:03:00.000Z",
+          promoted: {
+            repoPath: "docs/plan.md",
+            pointerPath: "/trace/tasks/usable-v1/docs/plan.md.eqnx-pointer.json",
+            missing: false,
+          },
+        },
+        sizeBytes: 12,
+      },
+      {
+        type: "doc",
+        createdAt: "2026-05-29T00:04:00.000Z",
+        doc: {
+          taskId: "task-1",
+          path: "/work/trace-v2/docs/gone.md",
+          createdAt: "2026-05-29T00:04:00.000Z",
+          promoted: {
+            repoPath: "docs/gone.md",
+            pointerPath: "/trace/tasks/usable-v1/docs/gone.md.eqnx-pointer.json",
+            missing: true,
+          },
+        },
+        sizeBytes: null,
+      },
+    ],
+    lastActivityAt: "2026-05-29T00:00:00.000Z",
+    tokenTotals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      totalTokens: 0,
+    },
+  };
+
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <TaskTimelineView timeline={timeline} />
+    </MemoryRouter>,
+  );
+
+  expect(html).toContain('title="In the project repo at docs/plan.md"');
+  expect(html).toContain(">In repo<");
+  expect(html).toContain(">Not on this machine<");
+});
