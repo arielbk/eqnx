@@ -3099,6 +3099,22 @@ test("TaskTimelineView marks a promoted doc as living in the repo", () => {
         },
         sizeBytes: null,
       },
+      {
+        type: "doc",
+        createdAt: "2026-05-29T00:05:00.000Z",
+        doc: {
+          taskId: "task-1",
+          path: "/work/trace-v2/.worktrees/other/docs/notes.md",
+          createdAt: "2026-05-29T00:05:00.000Z",
+          promoted: {
+            repoPath: "docs/notes.md",
+            pointerPath: "/trace/tasks/usable-v1/docs/notes.md.eqnx-pointer.json",
+            missing: false,
+            otherCheckout: "/work/trace-v2/.worktrees/other",
+          },
+        },
+        sizeBytes: 12,
+      },
     ],
     lastActivityAt: "2026-05-29T00:00:00.000Z",
     tokenTotals: {
@@ -3119,4 +3135,8 @@ test("TaskTimelineView marks a promoted doc as living in the repo", () => {
   expect(html).toContain('title="In the project repo at docs/plan.md"');
   expect(html).toContain(">In repo<");
   expect(html).toContain(">Not on this machine<");
+  expect(html).toContain(
+    'title="Read from another checkout at /work/trace-v2/.worktrees/other; read-only here"',
+  );
+  expect(html).toContain(">Other checkout<");
 });

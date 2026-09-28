@@ -599,6 +599,14 @@ export function TaskTimelineView({
                         {item.doc.promoted?.missing ? (
                           <span className="text-xs">Not on this machine</span>
                         ) : null}
+                        {item.doc.promoted?.otherCheckout ? (
+                          <span
+                            title={`Read from another checkout at ${item.doc.promoted.otherCheckout}; read-only here`}
+                            className="text-xs"
+                          >
+                            Other checkout
+                          </span>
+                        ) : null}
                       </p>
                     </div>
                   </div>

@@ -56,13 +56,39 @@ test("pointer files are recognized by their suffix", () => {
   expect(isDocPointerPath("/d/spec.md")).toBe(false);
 });
 
-test("resolveDocPointerTarget picks the first root that holds the file", () => {
+test("resolveDocPointerTarget prefers the task's own checkout", () => {
+  const otherRoot = join(dir, "other-checkout");
+  for (const root of [projectRoot, otherRoot]) {
+    mkdirSync(join(root, "docs"), { recursive: true });
+    writeFileSync(join(root, "docs", "spec.md"), "# Spec\n");
+  }
+
+  expect(resolveDocPointerTarget("docs/spec.md", [projectRoot, otherRoot])).toEqual({
+    path: join(projectRoot, "docs", "spec.md"),
+    missing: false,
+  });
+});
+
+test("resolveDocPointerTarget flags a file found only in another checkout", () => {
   const otherRoot = join(dir, "other-checkout");
   mkdirSync(join(otherRoot, "docs"), { recursive: true });
   writeFileSync(join(otherRoot, "docs", "spec.md"), "# Spec\n");
 
   expect(resolveDocPointerTarget("docs/spec.md", [projectRoot, otherRoot])).toEqual({
     path: join(otherRoot, "docs", "spec.md"),
+    missing: false,
+    otherCheckout: otherRoot,
+  });
+});
+
+test("resolveDocPointerTarget treats the first root on this machine as the task's own", () => {
+  // A synced task keeps the root it was stamped with on another machine.
+  const elsewhere = join(dir, "not-on-this-machine");
+  mkdirSync(join(projectRoot, "docs"), { recursive: true });
+  writeFileSync(join(projectRoot, "docs", "spec.md"), "# Spec\n");
+
+  expect(resolveDocPointerTarget("docs/spec.md", [elsewhere, projectRoot])).toEqual({
+    path: join(projectRoot, "docs", "spec.md"),
     missing: false,
   });
 });

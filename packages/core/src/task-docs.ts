@@ -82,6 +82,7 @@ function followPointer(doc: TaskDoc, projectRoots: readonly string[]): TaskDoc {
       repoPath: pointer.repoPath,
       pointerPath: doc.path,
       missing: target.missing,
+      ...(target.otherCheckout ? { otherCheckout: target.otherCheckout } : {}),
     },
   };
 }

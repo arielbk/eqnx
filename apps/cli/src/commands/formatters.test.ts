@@ -279,6 +279,15 @@ test("formatReEntryManifest marks promoted docs as living in the repo", () => {
         path: "/repo/docs/plan.md",
         promoted: { repoPath: "docs/plan.md", missing: true },
       },
+      {
+        title: "notes.md",
+        path: "/repo/.worktrees/other/docs/notes.md",
+        promoted: {
+          repoPath: "docs/notes.md",
+          missing: false,
+          otherCheckout: "/repo/.worktrees/other",
+        },
+      },
     ],
   };
 
@@ -291,6 +300,9 @@ test("formatReEntryManifest marks promoted docs as living in the repo", () => {
       "- title: plan.md",
       "  path: /repo/docs/plan.md (not on this machine)",
       "  inRepo: docs/plan.md",
+      "- title: notes.md",
+      "  path: /repo/.worktrees/other/docs/notes.md (from another checkout: /repo/.worktrees/other; read-only)",
+      "  inRepo: docs/notes.md",
     ].join("\n"),
   );
 });

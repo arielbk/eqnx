@@ -33,11 +33,14 @@ export function DocViewerSheet({
   onNavigateDocRoute?: (route: string) => void;
   triggerRef: RefObject<HTMLElement | null>;
   /** Set when the doc was promoted into the project repo. */
-  promoted?: { repoPath: string; missing: boolean };
+  promoted?: { repoPath: string; missing: boolean; otherCheckout?: string };
 }) {
   const query = useDocContents(taskRef, docPath);
   const toggleCheckbox = useToggleCheckbox();
-  const canEditDoc = useTraceDataSource().capabilities.docEdits;
+  // A copy borrowed from another checkout may be another branch's version, so
+  // it is read-only here just like a source with nowhere to write.
+  const canEditDoc =
+    useTraceDataSource().capabilities.docEdits && !promoted?.otherCheckout;
 
   return (
     <Sheet
@@ -53,6 +56,16 @@ export function DocViewerSheet({
         >
           Lives in the project repo at{" "}
           <span className="font-mono normal-case">{promoted.repoPath}</span>
+          {promoted.otherCheckout ? (
+            <>
+              {" "}
+              · Read from another checkout at{" "}
+              <span className="font-mono normal-case">
+                {promoted.otherCheckout}
+              </span>
+              , read-only here
+            </>
+          ) : null}
         </p>
       ) : null}
       <DocViewerBody

@@ -124,6 +124,12 @@ export type PromotedDoc = {
   pointerPath: string;
   /** The repo file is not on this machine (not pulled, other branch, no checkout). */
   missing: boolean;
+  /**
+   * Set when the task's own checkout lacks the file and it was found in this
+   * other checkout of the project instead (a worktree on another branch, a
+   * second clone). It may be a different version, so it is read-only here.
+   */
+  otherCheckout?: string;
 };
 
 export type PromoteTaskDocOptions = {
@@ -265,7 +271,7 @@ export type ReEntryManifestDoc = {
   path: string;
   title: string;
   description?: string;
-  promoted?: Pick<PromotedDoc, "repoPath" | "missing">;
+  promoted?: Pick<PromotedDoc, "repoPath" | "missing" | "otherCheckout">;
 };
 
 // The one session pointer the manifest carries: the latest session associated

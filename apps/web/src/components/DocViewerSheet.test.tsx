@@ -26,7 +26,7 @@ function renderSheet(
   options: {
     knownDocPaths?: readonly string[];
     onNavigateDocRoute?: (route: string) => void;
-    promoted?: { repoPath: string; missing: boolean };
+    promoted?: { repoPath: string; missing: boolean; otherCheckout?: string };
   } = {},
 ) {
   const triggerRef = createRef<HTMLElement>();
@@ -405,4 +405,32 @@ test("explains a promoted doc whose repo file is not on this machine", async () 
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "This document was promoted to docs/plan.md in the project repo, and that file is not on this machine.",
   );
+});
+
+test("a promoted doc read from another checkout says so and never writes a checkbox back", async () => {
+  const fetchMock = checkboxFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSheet("/work/.worktrees/other/docs/plan.md", () => {}, {
+    promoted: {
+      repoPath: "docs/plan.md",
+      missing: false,
+      otherCheckout: "/work/.worktrees/other",
+    },
+  });
+  await screen.findByText("First");
+
+  expect(screen.getByTestId("doc-viewer-promoted")).toHaveTextContent(
+    "Read from another checkout at /work/.worktrees/other",
+  );
+
+  const [firstBox] = screen.getAllByRole("checkbox") as HTMLInputElement[];
+  fireEvent.click(firstBox!);
+
+  expect(firstBox!.checked).toBe(false);
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/docs/checkbox"),
+    ),
+  ).toBe(false);
 });

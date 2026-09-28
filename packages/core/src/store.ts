@@ -2478,6 +2478,9 @@ function toManifestDoc(doc: TaskDoc): ReEntryManifestDoc {
           promoted: {
             repoPath: doc.promoted.repoPath,
             missing: doc.promoted.missing,
+            ...(doc.promoted.otherCheckout
+              ? { otherCheckout: doc.promoted.otherCheckout }
+              : {}),
           },
         }
       : {}),

@@ -79,24 +79,29 @@ function isSafeRepoPath(repoPath: string): boolean {
 /**
  * Resolve a pointer's repo path against candidate project roots (this task's
  * recorded root first, then any other root this machine knows for the
- * project). The first root that holds the file wins; when none does, the
- * target is reported missing at the first root so callers still have a path
- * to show.
+ * project). The task's own checkout is the first root that exists on this
+ * machine — the recorded one may be another machine's path after a sync. A
+ * file found only in some other checkout (a worktree on another branch, a
+ * second clone) still resolves, but is flagged with `otherCheckout`: it may be
+ * a different version, so callers must not write to it. When no root holds
+ * the file, the target is reported missing at the task's own checkout so
+ * callers still have a path to show.
  */
 export function resolveDocPointerTarget(
   repoPath: string,
   roots: readonly string[],
-): { path: string; missing: boolean } {
+): { path: string; missing: boolean; otherCheckout?: string } {
   const candidates = roots.filter((root) => root.trim().length > 0);
+  const home = candidates.find(isExistingDirectory) ?? candidates[0];
+  const at = (root: string) => join(root, ...repoPath.split("/"));
+
+  if (home && isFile(at(home))) return { path: at(home), missing: false };
   for (const root of candidates) {
-    const path = join(root, ...repoPath.split("/"));
-    if (isFile(path)) return { path, missing: false };
+    if (root !== home && isFile(at(root))) {
+      return { path: at(root), missing: false, otherCheckout: root };
+    }
   }
-  const first = candidates[0];
-  return {
-    path: first ? join(first, ...repoPath.split("/")) : repoPath,
-    missing: true,
-  };
+  return { path: home ? at(home) : repoPath, missing: true };
 }
 
 export type PromoteDocFileInput = {

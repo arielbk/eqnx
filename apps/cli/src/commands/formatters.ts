@@ -174,7 +174,7 @@ export function formatReEntryManifest(manifest: ReEntryManifest): string {
         // A promoted doc lives in the project repo; its checkout may not be
         // on this machine (or on this branch), so say so rather than hand an
         // agent a path that will not open.
-        `  path: ${doc.path}${doc.promoted?.missing ? " (not on this machine)" : ""}`,
+        `  path: ${doc.path}${promotedPathNote(doc.promoted)}`,
         ...(doc.promoted ? [`  inRepo: ${doc.promoted.repoPath}`] : []),
       ]),
     );
@@ -233,4 +233,16 @@ export function formatStateFreshness(freshness: {
     `  reason: ${freshness.reason}`,
     "",
   ].join("\n");
+}
+
+// A promoted doc's path may not open (its checkout is not here) or may be
+// another checkout's copy of it (possibly another branch's version).
+function promotedPathNote(
+  promoted: ReEntryManifest["docs"][number]["promoted"],
+): string {
+  if (promoted?.missing) return " (not on this machine)";
+  if (promoted?.otherCheckout) {
+    return ` (from another checkout: ${promoted.otherCheckout}; read-only)`;
+  }
+  return "";
 }

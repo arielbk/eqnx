@@ -226,6 +226,7 @@ export function handleTraceApiRequest(
           databasePath,
           task.slug,
           promotedDocPaths(store, task.id),
+          otherCheckoutDocPaths(store, task.id),
           body,
         );
         if (response.status === 200) options?.onMutation?.();
@@ -401,6 +402,19 @@ function resolveInBoundsDocPath(
   return resolved.startsWith(docsDir + sep) ? resolved : null;
 }
 
+// Promoted docs this machine found only in another checkout of the project.
+// They read fine, but may be another branch's version: never written to.
+function otherCheckoutDocPaths(
+  store: { listDocsForTask(taskId: string): TaskDoc[] },
+  taskId: string,
+): Set<string> {
+  return new Set(
+    store
+      .listDocsForTask(taskId)
+      .flatMap((doc) => (doc.promoted?.otherCheckout ? [doc.path] : [])),
+  );
+}
+
 function promotedDocPaths(
   store: { listDocsForTask(taskId: string): TaskDoc[] },
   taskId: string,
@@ -422,6 +436,7 @@ function toggleTaskDocCheckbox(
   databasePath: string,
   taskSlug: string,
   promotedPaths: ReadonlySet<string>,
+  otherCheckoutPaths: ReadonlySet<string>,
   body: string | undefined,
 ): TraceApiResponse {
   let parsed: unknown;
@@ -451,6 +466,12 @@ function toggleTaskDocCheckbox(
   );
   if (!resolved) {
     return badRequest("Doc path is outside the task's docs directory");
+  }
+  if (otherCheckoutPaths.has(resolved)) {
+    return {
+      status: 409,
+      body: "This doc was read from another checkout of the project; edit it there",
+    };
   }
 
   let content: string;

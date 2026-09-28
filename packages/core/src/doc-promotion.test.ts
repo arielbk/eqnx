@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { DOC_POINTER_SUFFIX, serializeDocPointer } from "./doc-pointer.ts";
@@ -211,4 +212,61 @@ test("the board API serves a promoted doc from the repo, and nothing else outsid
 
   unlinkSync(promoted.path);
   expect(read(promoted.path).status).toBe(404);
+});
+
+test("a promoted doc found only in another checkout lists from there, and refuses writes", () => {
+  // A second checkout of the project (a worktree on another branch) holds the
+  // file; the task's own checkout does not. Reading it is fine, but it may be
+  // a different version, so the board must not write into it.
+  const { store, task, docsDir } = seedTask({});
+  const otherCheckout = join(dir, "worktree");
+  mkdirSync(join(otherCheckout, "docs"), { recursive: true });
+  const otherFile = join(otherCheckout, "docs", "plan.md");
+  writeFileSync(otherFile, "# The plan\n\n- [ ] ship it\n");
+  writeFileSync(
+    join(docsDir, `plan.md${DOC_POINTER_SUFFIX}`),
+    serializeDocPointer({ repoPath: "docs/plan.md" }),
+  );
+  store.close();
+
+  const sqlite = new DatabaseSync(databasePath);
+  sqlite
+    .prepare(
+      "INSERT INTO project_roots (root_path, project_id, created_at) VALUES (?, ?, ?)",
+    )
+    .run(otherCheckout, task.projectId, new Date().toISOString());
+  sqlite.close();
+
+  const reopened = openTraceStore(databasePath);
+  try {
+    expect(reopened.listDocsForTask(task.id)).toEqual([
+      expect.objectContaining({
+        path: otherFile,
+        promoted: expect.objectContaining({ missing: false, otherCheckout }),
+      }),
+    ]);
+    expect(reopened.getReEntryManifest(task.id)?.docs).toEqual([
+      expect.objectContaining({
+        promoted: { repoPath: "docs/plan.md", missing: false, otherCheckout },
+      }),
+    ]);
+  } finally {
+    reopened.close();
+  }
+
+  const read = handleTraceApiRequest(
+    databasePath,
+    "GET",
+    `/api/tasks/${task.slug}/docs?path=${encodeURIComponent(otherFile)}`,
+  )!;
+  expect(read.status).toBe(200);
+
+  const write = handleTraceApiRequest(
+    databasePath,
+    "POST",
+    `/api/tasks/${task.slug}/docs/checkbox`,
+    JSON.stringify({ path: otherFile, index: 0, checked: true }),
+  )!;
+  expect(write.status).toBe(409);
+  expect(readFileSync(otherFile, "utf8")).toContain("- [ ] ship it");
 });
