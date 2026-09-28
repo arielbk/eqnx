@@ -52,7 +52,7 @@ export interface TraceApiRequestOptions {
    * since the user may flip the setting while the board is open. Absent means
    * the effective default, on. */
   autoSyncEnabled?: boolean;
-  /** Called after any successful mutating request (archive/unarchive, pin/unpin,
+  /** Called after any successful synced mutation (archive/unarchive, pin/unpin,
    * checkbox toggle) so the host can schedule a background sync that pushes the
    * change promptly instead of waiting for the next unrelated sync. */
   onMutation?: () => void;
@@ -141,6 +141,22 @@ export function handleTraceApiRequest(
             : store.unarchiveTask(ref);
         options?.onMutation?.();
         return json(task);
+      } finally {
+        store.close();
+      }
+    }
+
+    // Declining the board's "looks done — archive?" offer. It never archives,
+    // and it is machine-local (not synced), so no sync is scheduled for it.
+    const dismissMatch =
+      /^\/api\/tasks\/([^/]+)\/dismiss-archive-suggestion\/?$/.exec(path);
+    if (dismissMatch?.[1]) {
+      if (method !== "POST") return methodNotAllowed();
+      const store = openTraceStore(databasePath);
+      try {
+        return json(
+          store.dismissArchiveSuggestion(decodeURIComponent(dismissMatch[1])),
+        );
       } finally {
         store.close();
       }

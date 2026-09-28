@@ -80,6 +80,11 @@ export const migrationJournal = {
       tag: "0015_session_origin_machine",
       breakpoints: true,
     },
+    {
+      when: 1790600000000,
+      tag: "0016_task_archive_suggestion_dismissal",
+      breakpoints: false,
+    },
   ],
 } as const;
 
@@ -117,4 +122,9 @@ export const migrationSqlByTag: Record<string, string> = {
   // there is; a still-blank `machine_id` stays NULL and reads fall back.
   "0015_session_origin_machine":
     "ALTER TABLE `sessions` ADD `origin_machine_id` text;\n--> statement-breakpoint\nUPDATE `sessions` SET `origin_machine_id` = NULLIF(`machine_id`, '');\n",
+  // When the user last dismissed the board's "looks done — archive?" offer.
+  // Machine-local: it never enters the sync payload, so a dismissal neither
+  // moves the row's last-write-wins clock nor travels to other machines.
+  "0016_task_archive_suggestion_dismissal":
+    "ALTER TABLE `tasks` ADD `archive_suggestion_dismissed_at` text;\n",
 };

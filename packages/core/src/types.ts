@@ -203,6 +203,11 @@ export type TaskTimeline = {
    * task has at least one non-state doc to reflect on.
    */
   stateStale?: boolean;
+  /**
+   * Present (and true) only when the task looks done and EQNX suggests
+   * archiving it — see `suggestsArchive`. Never acted on automatically.
+   */
+  archiveSuggested?: true;
 };
 
 export type TaskSummary = Task & {
@@ -211,6 +216,8 @@ export type TaskSummary = Task & {
   tokenTotals: TokenTotals;
   agentTools: SessionTool[];
   hasDocs: boolean;
+  /** Present only when EQNX suggests archiving; see `suggestsArchive`. */
+  archiveSuggested?: true;
 };
 
 export type GitWorkContext = {
@@ -262,6 +269,8 @@ export type ReEntryManifest = {
   docs: ReEntryManifestDoc[];
   lastSession?: ReEntryManifestSession;
   lastWorkedOn?: LastWorkedOn;
+  /** Present only when the task looks done; the agent may offer to archive. */
+  archiveSuggested?: true;
 };
 
 export type RegisterSessionInput = {
@@ -309,6 +318,9 @@ export type TaskStore = {
   updateTaskDescription(ref: string, description: string): Task;
   archiveTask(ref: string): Task;
   unarchiveTask(ref: string): Task;
+  // Record that the user declined the "looks done — archive?" suggestion.
+  // Never archives; machine-local, so it does not touch the sync clock.
+  dismissArchiveSuggestion(ref: string): Task;
   pinTask(ref: string): Task;
   unpinTask(ref: string): Task;
   registerSession(input: RegisterSessionInput): Session;

@@ -35,7 +35,11 @@ import {
 import { resolveSessionName } from "./session-name.ts";
 import { parseStateMd } from "./state-parser.ts";
 import { computeStateFreshness } from "./state-freshness.ts";
-import { partitionStateDocument } from "./state-document.ts";
+import {
+  partitionStateDocument,
+  readStateDocument,
+} from "./state-document.ts";
+import { declaresDone, suggestsArchive } from "./archive-suggestion.ts";
 import {
   getTranscriptAdapter,
   type ParsedTranscript,
@@ -400,6 +404,7 @@ class NodeSqliteTaskStore implements TaskStore {
         tokenTotals,
         agentTools,
         hasDocs,
+        ...(this.#archiveSuggested(task) ? { archiveSuggested: true } : {}),
       };
     });
   }
@@ -527,6 +532,64 @@ class NodeSqliteTaskStore implements TaskStore {
       .run(this.#updatedNow(), this.#machineId, task.id);
 
     return { ...task, archivedAt: null };
+  }
+
+  dismissArchiveSuggestion(ref: string): Task {
+    const task = this.getTaskByRef(ref);
+    if (!task) throw new Error(`Task not found: ${ref}`);
+
+    // Deliberately leaves updated_at/machine_id alone: the dismissal is a
+    // machine-local board preference, not synced task state.
+    this.#sqlite
+      .prepare(
+        "UPDATE tasks SET archive_suggestion_dismissed_at = ? WHERE id = ?",
+      )
+      .run(new Date().toISOString(), task.id);
+
+    return task;
+  }
+
+  // Whether EQNX suggests archiving this task — the one place the store
+  // gathers `suggestsArchive`'s inputs, so the board list, the task page and
+  // the re-entry manifest can never disagree. The state file is read first and
+  // the rest only when it declares the task done, so an ordinary task costs
+  // one small file read.
+  #archiveSuggested(task: Task): boolean {
+    if (task.archivedAt !== null) return false;
+    const docsDir = resolveTaskDocsDir(this.#databasePath, task.slug);
+    const document = readStateDocument(docsDir, "");
+    if (!document.exists || !declaresDone(document.raw)) return false;
+
+    const { state, others } = partitionStateDocument(
+      this.listDocsForTask(task.id),
+    );
+    const row = this.#sqlite
+      .prepare(
+        `SELECT t.archive_suggestion_dismissed_at AS dismissed_at,
+                (SELECT MAX(s.created_at) FROM sessions s WHERE s.task_id = t.id)
+                  AS last_session_at
+         FROM tasks t WHERE t.id = ?`,
+      )
+      .get(task.id) as
+      | { dismissed_at: string | null; last_session_at: string | null }
+      | undefined;
+    const lastWorkAt = [
+      row?.last_session_at ?? null,
+      ...others.map((doc) => doc.createdAt),
+    ]
+      .filter((at): at is string => at !== null)
+      .reduce<string | undefined>(
+        (latest, at) => (latest === undefined || at > latest ? at : latest),
+        undefined,
+      );
+
+    return suggestsArchive({
+      archivedAt: task.archivedAt,
+      stateText: document.raw,
+      stateWrittenAt: document.stamp?.writtenAt ?? state?.createdAt,
+      lastWorkAt,
+      dismissedAt: row?.dismissed_at ?? null,
+    });
   }
 
   pinTask(ref: string): Task {
@@ -1172,6 +1235,7 @@ class NodeSqliteTaskStore implements TaskStore {
       ...(lastWorkedOn ? { lastWorkedOn } : {}),
       ...(stateAuthor ? { stateAuthor } : {}),
       ...(stateStale === undefined ? {} : { stateStale }),
+      ...(this.#archiveSuggested(task) ? { archiveSuggested: true } : {}),
     };
   }
 
@@ -1222,6 +1286,7 @@ class NodeSqliteTaskStore implements TaskStore {
           }
         : {}),
       ...(lastWorkedOn ? { lastWorkedOn } : {}),
+      ...(this.#archiveSuggested(task) ? { archiveSuggested: true } : {}),
     };
   }
 
