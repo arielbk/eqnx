@@ -5,7 +5,6 @@ import {
   byActivityDesc,
   filterByProjectSlug,
   getProjectCounts,
-  groupTasksByProject,
   partitionPinned,
   visibleTasks,
 } from "./task-list.ts";
@@ -190,37 +189,6 @@ describe("getProjectCounts", () => {
     const counts = getProjectCounts(tasks);
     expect(counts[0]?.projectSlug).toBe("alpha");
     expect(counts[1]?.projectSlug).toBe("zebra");
-  });
-});
-
-describe("groupTasksByProject", () => {
-  test("groups sibling checkout roots under the stable project ID and slug", () => {
-    const groups = groupTasksByProject([
-      summary({
-        id: "main",
-        projectRoot: "/work/main",
-        projectId: "project-alpha",
-        projectSlug: "alpha-app",
-        lastActivityAt: "2026-01-01T00:00:00.000Z",
-      }),
-      summary({
-        id: "worktree",
-        projectRoot: "/tmp/alpha-worktree",
-        projectId: "project-alpha",
-        projectSlug: "alpha-app",
-        lastActivityAt: "2026-01-02T00:00:00.000Z",
-      }),
-    ]);
-
-    expect(groups).toHaveLength(1);
-    expect(groups[0]).toMatchObject({
-      projectId: "project-alpha",
-      projectSlug: "alpha-app",
-    });
-    expect(groups[0]?.tasks.map((task) => task.id)).toEqual([
-      "worktree",
-      "main",
-    ]);
   });
 });
 
