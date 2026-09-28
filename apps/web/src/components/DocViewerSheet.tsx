@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { MouseEvent, RefObject } from "react";
+import { useLayoutEffect, useRef, type MouseEvent, type RefObject } from "react";
 import { truncatePath } from "../format.ts";
 import {
   HttpError,
@@ -46,6 +46,10 @@ export function DocViewerSheet({
       <DocViewerBody
         query={query}
         onClick={(event) => {
+          // First, so a code block nested in a task-list line copies instead of
+          // toggling the line's checkbox.
+          if (copyCodeFromClick(event)) return;
+
           const checkbox = checkboxToggleFromClick(event);
           if (checkbox) {
             const { input, index, checked } = checkbox;
@@ -89,6 +93,18 @@ function DocViewerBody({
   query: UseQueryResult<DocContents, Error>;
   onClick?: (event: MouseEvent<HTMLDivElement>) => void;
 }) {
+  const proseRef = useRef<HTMLDivElement>(null);
+  const html = query.data?.contentType.startsWith("text/html")
+    ? query.data.body
+    : null;
+
+  // The doc arrives as server-rendered HTML, so React can't own children inside
+  // it. Add the copy buttons after each render of new HTML; clicks reach them
+  // through the container's delegated handler, like the checkboxes.
+  useLayoutEffect(() => {
+    if (html !== null && proseRef.current) addCopyButtons(proseRef.current);
+  }, [html]);
+
   if (query.isPending) {
     return <p className="text-text-muted">Loading…</p>;
   }
@@ -101,12 +117,13 @@ function DocViewerBody({
     );
   }
 
-  if (query.data.contentType.startsWith("text/html")) {
+  if (html !== null) {
     return (
       <div
+        ref={proseRef}
         className="doc-viewer-prose text-base text-text-muted leading-relaxed"
         onClick={onClick}
-        dangerouslySetInnerHTML={{ __html: query.data.body }}
+        dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   }
@@ -158,6 +175,44 @@ function docLinkRouteFromClick(
     knownDocPaths,
     taskRef,
   });
+}
+
+const COPY_LABEL = "Copy";
+const COPIED_LABEL = "Copied";
+const COPIED_RESET_MS = 1200;
+
+function addCopyButtons(container: HTMLElement): void {
+  for (const pre of container.querySelectorAll("pre")) {
+    if (pre.querySelector(":scope > [data-copy-code]")) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.copyCode = "";
+    button.className = "doc-code-copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.textContent = COPY_LABEL;
+    pre.append(button);
+  }
+}
+
+function copyCodeFromClick(event: MouseEvent<HTMLDivElement>): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const button = target.closest("[data-copy-code]");
+  if (!(button instanceof HTMLButtonElement)) return false;
+
+  // Read the <code> rather than the <pre>, which also holds the button's label.
+  const pre = button.closest("pre");
+  const text = pre?.querySelector("code")?.textContent ?? "";
+  // Clipboard may be unavailable (insecure context, denied permission); still
+  // confirm, matching useClipboardCopy.
+  navigator.clipboard?.writeText(text).catch(() => {});
+
+  button.textContent = COPIED_LABEL;
+  window.clearTimeout(Number(button.dataset.resetTimer));
+  button.dataset.resetTimer = String(
+    window.setTimeout(() => (button.textContent = COPY_LABEL), COPIED_RESET_MS),
+  );
+  return true;
 }
 
 function checkboxToggleFromClick(

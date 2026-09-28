@@ -552,6 +552,30 @@
   border: none;
   padding: 0;
 }
+.doc-viewer-prose pre { position: relative; }
+.doc-code-copy {
+  position: absolute;
+  top: 0.4em;
+  right: 0.4em;
+  padding: 0.15em 0.5em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.25em;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.doc-code-copy:hover { color: var(--color-text); border-color: var(--color-border-strong); }
+.doc-viewer-prose pre:hover .doc-code-copy,
+.doc-code-copy:focus-visible { opacity: 1; }
+@media (hover: none) {
+  .doc-code-copy { opacity: 1; }
+}
 .doc-viewer-prose blockquote {
   margin: 0.8em 0;
   padding-left: 1em;
