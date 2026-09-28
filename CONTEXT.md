@@ -38,6 +38,14 @@ docs, and architecture reviews so names stay consistent.
   started when the file was last written. Resolved *backwards* from the state
   file's timestamp so the session reading the snapshot back — or the one that
   just re-entered the task — never gets credited with words it did not write.
+- **Archive suggestion** — EQNX's "this looks done — archive it?" offer
+  (`suggestsArchive`). It rests on an explicit signal, never inactivity: the
+  task's `state.md` Next step leads with a done declaration (`Done.`), no
+  session or doc has arrived since that prose was written, and the user has not
+  dismissed it since. EQNX only ever suggests — the board offers a one-click
+  archive or a dismiss, and the re-entry manifest's `archiveSuggestion:` block
+  lets the agent offer the same. A dismissal is machine-local (not synced) and
+  lasts until the state prose is rewritten.
 - **Token Totals** — the value module owning token arithmetic (`empty`, `add`,
   `fromUsage`); consumed by adapters and the store instead of per-call copies.
 - **Pricing** — the value module owning list-price-equivalent cost

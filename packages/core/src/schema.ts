@@ -37,6 +37,7 @@ export const tasks = sqliteTable("tasks", {
   archivedAt: text("archived_at"),
   description: text("description"),
   pinnedAt: text("pinned_at"),
+  archiveSuggestionDismissedAt: text("archive_suggestion_dismissed_at"),
   updatedAt: text("updated_at").notNull(),
   machineId: text("machine_id").notNull(),
 });

@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { freshTokenTotal, type TaskSummary } from "@trace/core/browser";
 import type { SessionTool } from "@trace/core/browser";
 import { ReEnterButton } from "./ReEnterButton.tsx";
+import { ArchiveSuggestionChip } from "./ArchiveSuggestion.tsx";
 import {
   ArchiveIcon,
   PinIcon,
@@ -33,6 +34,7 @@ export function TaskRow({
   onUnarchive,
   onPin,
   onUnpin,
+  onDismissArchiveSuggestion,
   linkToDetail = true,
   collapseOnArchive = true,
 }: {
@@ -41,6 +43,7 @@ export function TaskRow({
   onUnarchive?: (task: TaskSummary) => void | Promise<void>;
   onPin?: (task: TaskSummary) => void | Promise<void>;
   onUnpin?: (task: TaskSummary) => void | Promise<void>;
+  onDismissArchiveSuggestion?: (task: TaskSummary) => void | Promise<void>;
   /** False where the data source exposes no task detail view to link into. */
   linkToDetail?: boolean;
   /**
@@ -175,6 +178,19 @@ export function TaskRow({
               <span className="task-row-project flex-shrink-0 font-mono text-chip px-1.5 py-px rounded bg-chip-bg text-chip-text border border-border whitespace-nowrap">
                 {projectName}
               </span>
+              {task.archiveSuggested &&
+              !archived &&
+              archivePhase === "idle" &&
+              onArchive &&
+              onDismissArchiveSuggestion ? (
+                <ArchiveSuggestionChip
+                  taskLabel={untitled ? "untitled task" : task.title}
+                  onArchive={handleArchiveClick}
+                  onDismiss={() =>
+                    runRowAction(onDismissArchiveSuggestion, task)
+                  }
+                />
+              ) : null}
               {archived && (
                 <span className="archived-badge flex-shrink-0 font-mono text-badge font-bold uppercase px-1.5 py-px rounded text-text-muted border border-border whitespace-nowrap">
                   Archived

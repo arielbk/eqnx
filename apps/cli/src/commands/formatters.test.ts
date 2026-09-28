@@ -115,6 +115,31 @@ test("formatReEntryManifest renders an empty doc index and omits an absent sessi
   );
 });
 
+test("formatReEntryManifest tells the agent a task looks done — an offer, never an action", () => {
+  const manifest: ReEntryManifest = {
+    task: { id: "task-1", title: "Ship formatters", projectRoot: "/repo" },
+    taskDocsDir: "/trace/tasks/ship-formatters/docs",
+    docs: [],
+    archiveSuggested: true,
+  };
+
+  expect(formatReEntryManifest(manifest)).toBe(
+    [
+      "task:",
+      "  id: task-1",
+      "  title: Ship formatters",
+      "  projectRoot: /repo",
+      "taskDocsDir: /trace/tasks/ship-formatters/docs",
+      "docs: []",
+      "archiveSuggestion:",
+      "  looksDone: true",
+      "  reason: state.md's Next step says this task is done, and no work has started since.",
+      "  action: Offer once to archive it from the EQNX board; EQNX never archives on its own. If the user keeps working, drop it.",
+      "",
+    ].join("\n"),
+  );
+});
+
 test("formatReEntryManifest renders state, the doc index, and the prior session", () => {
   // A transcript this machine can actually read — the ordinary case, where the
   // pointer needs no qualification.

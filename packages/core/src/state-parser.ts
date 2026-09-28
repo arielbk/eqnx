@@ -24,6 +24,40 @@ export function parseStateMd(text: string): ParsedStateMd {
     currentState: [],
     openQuestions: [],
   };
+  const { summary, sections, preamble } = collectSections(text);
+
+  const fallbackSummary = firstContentLine(preamble);
+  const summaryText = summary ?? fallbackSummary;
+  if (summaryText) {
+    result.summary = renderInlineMarkdown(summaryText);
+  }
+
+  result.decisions = parseListOrParagraphs(sections.get("decisions") ?? []);
+  result.currentState = parseBlocks(sections.get("currentState") ?? []);
+  result.nextStep = parseFirstBlock(sections.get("nextStep") ?? []);
+  result.openQuestions = parseListOrParagraphs(
+    sections.get("openQuestions") ?? [],
+  );
+
+  return result;
+}
+
+/**
+ * The raw markdown of the Next step's first block — the single action the
+ * state prose names — or undefined when the section is absent or says
+ * nothing. Unrendered, for callers that read what the prose *says* rather
+ * than display it.
+ */
+export function readNextStepText(text: string): string | undefined {
+  const lines = collectSections(text).sections.get("nextStep") ?? [];
+  return splitBlocks(lines).find(isMeaningfulValue);
+}
+
+function collectSections(text: string): {
+  summary: string | undefined;
+  sections: Map<StateSection, string[]>;
+  preamble: string[];
+} {
   const body = stripFooter(text);
   const lines = body.split(/\r?\n/);
   let summary: string | undefined;
@@ -60,20 +94,7 @@ export function parseStateMd(text: string): ParsedStateMd {
     }
   }
 
-  const fallbackSummary = firstContentLine(preamble);
-  const summaryText = summary ?? fallbackSummary;
-  if (summaryText) {
-    result.summary = renderInlineMarkdown(summaryText);
-  }
-
-  result.decisions = parseListOrParagraphs(sections.get("decisions") ?? []);
-  result.currentState = parseBlocks(sections.get("currentState") ?? []);
-  result.nextStep = parseFirstBlock(sections.get("nextStep") ?? []);
-  result.openQuestions = parseListOrParagraphs(
-    sections.get("openQuestions") ?? [],
-  );
-
-  return result;
+  return { summary, sections, preamble };
 }
 
 function stripFooter(text: string): string {

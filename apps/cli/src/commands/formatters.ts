@@ -205,6 +205,17 @@ export function formatReEntryManifest(manifest: ReEntryManifest): string {
     );
   }
 
+  // Only a task that looks done carries this; EQNX suggests, the user decides.
+  // The agent can only offer — archiving stays a board action.
+  if (manifest.archiveSuggested) {
+    lines.push(
+      "archiveSuggestion:",
+      "  looksDone: true",
+      "  reason: state.md's Next step says this task is done, and no work has started since.",
+      "  action: Offer once to archive it from the EQNX board; EQNX never archives on its own. If the user keeps working, drop it.",
+    );
+  }
+
   return [...lines, ""].join("\n");
 }
 

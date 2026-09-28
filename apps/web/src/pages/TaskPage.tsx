@@ -21,6 +21,7 @@ import { DocViewerSheet } from "../components/DocViewerSheet.tsx";
 import { ReEnterButton } from "../components/ReEnterButton.tsx";
 import { useClipboardCopy } from "../components/useClipboardCopy.ts";
 import { TaskActionsMenu } from "../components/TaskActionsMenu.tsx";
+import { ArchiveSuggestionCallout } from "../components/ArchiveSuggestion.tsx";
 import { LocalConnectionBadge } from "../components/LocalTraceConnection.tsx";
 import cursorIconDarkUrl from "../assets/cursor-icon-dark.png";
 import cursorIconLightUrl from "../assets/cursor-icon-light.png";
@@ -45,6 +46,7 @@ import {
   useArchiveTask,
   useTaskTimeline,
   useUnarchiveTask,
+  useDismissArchiveSuggestion,
 } from "../lib/api.ts";
 import { resolveTaskDocLink } from "../lib/doc-link-resolver.ts";
 import { useTraceDataSource } from "../lib/trace-data-source.ts";
@@ -55,6 +57,7 @@ export function TaskPage() {
   const query = useTaskTimeline(id);
   const archiveMutation = useArchiveTask();
   const unarchiveMutation = useUnarchiveTask();
+  const dismissSuggestionMutation = useDismissArchiveSuggestion();
 
   const reveal = useSkeletonReveal(!query.isLoading);
 
@@ -79,6 +82,9 @@ export function TaskPage() {
           }
           onArchive={() => archiveMutation.mutate(id)}
           onUnarchive={() => unarchiveMutation.mutate(id)}
+          onDismissArchiveSuggestion={() =>
+            dismissSuggestionMutation.mutate(id)
+          }
         />
       ) : null}
     </SkeletonReveal>
@@ -270,6 +276,7 @@ export function TaskTimelineView({
   onCloseDoc,
   onArchive,
   onUnarchive,
+  onDismissArchiveSuggestion,
 }: {
   timeline: TaskTimeline;
   now?: Date;
@@ -280,6 +287,7 @@ export function TaskTimelineView({
   onCloseDoc?: () => void;
   onArchive?: () => void | Promise<void>;
   onUnarchive?: () => void | Promise<void>;
+  onDismissArchiveSuggestion?: () => void | Promise<void>;
 }) {
   const source = useTraceDataSource();
   const archivedAt =
@@ -436,6 +444,18 @@ export function TaskTimelineView({
             />
           ) : null}
         </div>
+        {timeline.archiveSuggested &&
+        !isArchived &&
+        source.capabilities.taskMutations &&
+        onArchive &&
+        onDismissArchiveSuggestion ? (
+          <ArchiveSuggestionCallout
+            onArchive={() => void Promise.resolve(onArchive()).catch(() => {})}
+            onDismiss={() =>
+              void Promise.resolve(onDismissArchiveSuggestion()).catch(() => {})
+            }
+          />
+        ) : null}
       </div>
       <LeftOffPanel
         state={timeline.state}

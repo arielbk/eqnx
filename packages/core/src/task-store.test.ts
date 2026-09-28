@@ -114,6 +114,7 @@ test("store opens in WAL mode and applies migrations idempotently", () => {
         "project_id",
         "updated_at",
         "machine_id",
+        "archive_suggestion_dismissed_at",
       ]);
 
       expect(sessionColumnNames(database)).toEqual([
