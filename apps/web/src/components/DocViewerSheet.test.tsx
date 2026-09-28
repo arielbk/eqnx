@@ -26,6 +26,7 @@ function renderSheet(
   options: {
     knownDocPaths?: readonly string[];
     onNavigateDocRoute?: (route: string) => void;
+    promoted?: { repoPath: string; missing: boolean; otherCheckout?: string };
   } = {},
 ) {
   const triggerRef = createRef<HTMLElement>();
@@ -38,6 +39,7 @@ function renderSheet(
         triggerRef={triggerRef}
         onOpenChange={onOpenChange}
         onNavigateDocRoute={options.onNavigateDocRoute}
+        promoted={options.promoted}
       />
     </QueryClientProvider>,
   );
@@ -250,6 +252,73 @@ test("clicking the line text toggles the line's checkbox, like a label", async (
   );
 });
 
+function stubHtmlDoc(html: string) {
+  const fetchMock = vi.fn().mockImplementation((url: string) => {
+    if (typeof url === "string" && url.includes("/docs/checkbox")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+    return Promise.resolve(
+      new Response(html, { status: 200, headers: { "content-type": "text/html" } }),
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function stubClipboard() {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText },
+    writable: true,
+    configurable: true,
+  });
+  return writeText;
+}
+
+test("each code block gets a copy button that copies only the code", async () => {
+  stubHtmlDoc(
+    '<pre><code class="language-sh">eqnx sync\n</code></pre>' +
+      "<p>then</p>" +
+      "<pre><code>pnpm test\n</code></pre>",
+  );
+  const writeText = stubClipboard();
+
+  renderSheet("/work/docs/plan.md");
+  await screen.findByText("then");
+
+  const buttons = screen.getAllByRole("button", { name: "Copy code" });
+  expect(buttons).toHaveLength(2);
+
+  fireEvent.click(buttons[1]!);
+
+  expect(writeText).toHaveBeenCalledWith("pnpm test\n");
+  expect(await screen.findByText("Copied")).toBeInTheDocument();
+});
+
+test("copying a code block inside a task-list line leaves the checkbox alone", async () => {
+  const fetchMock = stubHtmlDoc(
+    '<ul><li><input data-checkbox-index="0" type="checkbox"> Run' +
+      "<pre><code>pnpm build\n</code></pre></li></ul>",
+  );
+  const writeText = stubClipboard();
+
+  renderSheet("/work/docs/plan.md");
+  await screen.findByText("Run");
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+
+  expect(writeText).toHaveBeenCalledWith("pnpm build\n");
+  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect(
+    fetchMock.mock.calls.some(([url]) => String(url).includes("/docs/checkbox")),
+  ).toBe(false);
+});
+
 test("reverts the optimistic checkbox flip when the server rejects", async () => {
   const fetchMock = vi.fn().mockImplementation((url: string) => {
     if (typeof url === "string" && url.includes("/docs/checkbox")) {
@@ -306,4 +375,62 @@ test("does not intercept unknown, external, or non-markdown links", async () => 
     expect(event.defaultPrevented).toBe(false);
   }
   expect(onNavigateDocRoute).not.toHaveBeenCalled();
+});
+
+test("says where a promoted doc lives in the repo", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response("<h1>Plan</h1>", { status: 200, headers: { "content-type": "text/html" } }),
+    ),
+  );
+
+  renderSheet("/work/docs/plan.md", () => {}, {
+    promoted: { repoPath: "docs/plan.md", missing: false },
+  });
+
+  expect(await screen.findByRole("heading", { name: "Plan" })).toBeInTheDocument();
+  expect(screen.getByTestId("doc-viewer-promoted")).toHaveTextContent(
+    "Lives in the project repo at docs/plan.md",
+  );
+});
+
+test("explains a promoted doc whose repo file is not on this machine", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+
+  renderSheet("/work/docs/plan.md", () => {}, {
+    promoted: { repoPath: "docs/plan.md", missing: true },
+  });
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This document was promoted to docs/plan.md in the project repo, and that file is not on this machine.",
+  );
+});
+
+test("a promoted doc read from another checkout says so and never writes a checkbox back", async () => {
+  const fetchMock = checkboxFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSheet("/work/.worktrees/other/docs/plan.md", () => {}, {
+    promoted: {
+      repoPath: "docs/plan.md",
+      missing: false,
+      otherCheckout: "/work/.worktrees/other",
+    },
+  });
+  await screen.findByText("First");
+
+  expect(screen.getByTestId("doc-viewer-promoted")).toHaveTextContent(
+    "Read from another checkout at /work/.worktrees/other",
+  );
+
+  const [firstBox] = screen.getAllByRole("checkbox") as HTMLInputElement[];
+  fireEvent.click(firstBox!);
+
+  expect(firstBox!.checked).toBe(false);
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/docs/checkbox"),
+    ),
+  ).toBe(false);
 });

@@ -137,6 +137,11 @@ describe("TraceDataSource", () => {
       source.request("/api/tasks/checkout/pin", { method: "POST" }),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(
+      source.request("/api/tasks/checkout/dismiss-archive-suggestion", {
+        method: "POST",
+      }),
+    ).rejects.toBeInstanceOf(UnsupportedOperationError);
+    await expect(
       source.request("/api/tasks/checkout/export"),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
     await expect(source.request("/api/sync/status")).rejects.toBeInstanceOf(

@@ -21,6 +21,7 @@ import { DocViewerSheet } from "../components/DocViewerSheet.tsx";
 import { ReEnterButton } from "../components/ReEnterButton.tsx";
 import { useClipboardCopy } from "../components/useClipboardCopy.ts";
 import { TaskActionsMenu } from "../components/TaskActionsMenu.tsx";
+import { ArchiveSuggestionCallout } from "../components/ArchiveSuggestion.tsx";
 import { LocalConnectionBadge } from "../components/LocalTraceConnection.tsx";
 import cursorIconDarkUrl from "../assets/cursor-icon-dark.png";
 import cursorIconLightUrl from "../assets/cursor-icon-light.png";
@@ -45,6 +46,7 @@ import {
   useArchiveTask,
   useTaskTimeline,
   useUnarchiveTask,
+  useDismissArchiveSuggestion,
 } from "../lib/api.ts";
 import { resolveTaskDocLink } from "../lib/doc-link-resolver.ts";
 import { useTraceDataSource } from "../lib/trace-data-source.ts";
@@ -55,6 +57,7 @@ export function TaskPage() {
   const query = useTaskTimeline(id);
   const archiveMutation = useArchiveTask();
   const unarchiveMutation = useUnarchiveTask();
+  const dismissSuggestionMutation = useDismissArchiveSuggestion();
 
   const reveal = useSkeletonReveal(!query.isLoading);
 
@@ -79,6 +82,9 @@ export function TaskPage() {
           }
           onArchive={() => archiveMutation.mutate(id)}
           onUnarchive={() => unarchiveMutation.mutate(id)}
+          onDismissArchiveSuggestion={() =>
+            dismissSuggestionMutation.mutate(id)
+          }
         />
       ) : null}
     </SkeletonReveal>
@@ -270,6 +276,7 @@ export function TaskTimelineView({
   onCloseDoc,
   onArchive,
   onUnarchive,
+  onDismissArchiveSuggestion,
 }: {
   timeline: TaskTimeline;
   now?: Date;
@@ -280,6 +287,7 @@ export function TaskTimelineView({
   onCloseDoc?: () => void;
   onArchive?: () => void | Promise<void>;
   onUnarchive?: () => void | Promise<void>;
+  onDismissArchiveSuggestion?: () => void | Promise<void>;
 }) {
   const source = useTraceDataSource();
   const archivedAt =
@@ -321,8 +329,25 @@ export function TaskTimelineView({
     (item) => item.type === "session",
   ).length;
   const docCount = timeline.items.filter((item) => item.type === "doc").length;
-  const knownDocPaths = timeline.items.flatMap((item) =>
-    item.type === "doc" ? [item.doc.path] : [],
+  // A promoted doc lists as its repo file, outside the task docs dir. Its
+  // pointer (never a markdown link target) goes first so link resolution
+  // still anchors relative hrefs on the task docs dir.
+  const knownDocPaths = [
+    ...timeline.items.flatMap((item) =>
+      item.type === "doc" && item.doc.promoted
+        ? [item.doc.promoted.pointerPath]
+        : [],
+    ),
+    ...timeline.items.flatMap((item) =>
+      item.type === "doc" ? [item.doc.path] : [],
+    ),
+  ];
+  const promotedDocs = new Map(
+    timeline.items.flatMap((item) =>
+      item.type === "doc" && item.doc.promoted
+        ? [[item.doc.path, item.doc.promoted] as const]
+        : [],
+    ),
   );
 
   function navigateStateDocLink(event: MouseEvent<HTMLElement>) {
@@ -419,6 +444,18 @@ export function TaskTimelineView({
             />
           ) : null}
         </div>
+        {timeline.archiveSuggested &&
+        !isArchived &&
+        source.capabilities.taskMutations &&
+        onArchive &&
+        onDismissArchiveSuggestion ? (
+          <ArchiveSuggestionCallout
+            onArchive={() => void Promise.resolve(onArchive()).catch(() => {})}
+            onDismiss={() =>
+              void Promise.resolve(onDismissArchiveSuggestion()).catch(() => {})
+            }
+          />
+        ) : null}
       </div>
       <LeftOffPanel
         state={timeline.state}
@@ -551,6 +588,25 @@ export function TaskTimelineView({
                             {formatBytes(item.sizeBytes)}
                           </span>
                         ) : null}
+                        {item.doc.promoted ? (
+                          <span
+                            title={`In the project repo at ${item.doc.promoted.repoPath}`}
+                            className="text-xs font-bold uppercase tracking-wide"
+                          >
+                            In repo
+                          </span>
+                        ) : null}
+                        {item.doc.promoted?.missing ? (
+                          <span className="text-xs">Not on this machine</span>
+                        ) : null}
+                        {item.doc.promoted?.otherCheckout ? (
+                          <span
+                            title={`Read from another checkout at ${item.doc.promoted.otherCheckout}; read-only here`}
+                            className="text-xs"
+                          >
+                            Other checkout
+                          </span>
+                        ) : null}
                       </p>
                     </div>
                   </div>
@@ -567,6 +623,7 @@ export function TaskTimelineView({
             taskRef={timeline.task.slug}
             docPath={selectedDocPath}
             knownDocPaths={knownDocPaths}
+            promoted={promotedDocs.get(selectedDocPath)}
             triggerRef={docTriggerRef}
             onNavigateDocRoute={onNavigateDocRoute}
             onOpenChange={(open) => {
@@ -603,8 +660,11 @@ function SessionRootRow({
   // stacking two pills.
   const originBadge = sessionOriginBadge(item.session);
   const childTitle = item.sessionName ? null : sessionChildTitle(item.session);
+  // A session from another machine has no transcript here to resume.
   const resumeCopyValue =
-    item.session.origin === "root" ? resumeCommand(item.session) : null;
+    item.session.origin === "root" && !item.fromAnotherMachine
+      ? resumeCommand(item.session)
+      : null;
   const title = item.sessionName ?? childTitle;
 
   return (
@@ -646,6 +706,14 @@ function SessionRootRow({
             {originBadge && !childTitle ? (
               <span className="inline-flex items-center w-fit min-h-chip-min px-2 rounded-full text-xs font-bold leading-none text-chip-text bg-chip-bg border border-chip-border">
                 {originBadge}
+              </span>
+            ) : null}
+            {item.fromAnotherMachine ? (
+              <span
+                className="inline-flex items-center w-fit min-h-chip-min px-2 rounded-full text-xs font-bold leading-none text-chip-text bg-chip-bg border border-chip-border"
+                title="Ran on another machine, so its transcript isn't on this one"
+              >
+                Other machine
               </span>
             ) : null}
             <span

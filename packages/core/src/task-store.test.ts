@@ -114,6 +114,7 @@ test("store opens in WAL mode and applies migrations idempotently", () => {
         "project_id",
         "updated_at",
         "machine_id",
+        "archive_suggestion_dismissed_at",
       ]);
 
       expect(sessionColumnNames(database)).toEqual([
@@ -140,6 +141,7 @@ test("store opens in WAL mode and applies migrations idempotently", () => {
         "git_branch",
         "git_worktree_label",
         "git_worktree_path",
+        "origin_machine_id",
       ]);
     } finally {
       database.close();
@@ -1331,6 +1333,8 @@ test("migration keeps existing session rows readable with a null model", () => {
         createdAt: "2026-05-29T00:00:01.000Z",
         updatedAt: "2026-05-29T00:00:01.000Z",
         machineId: expect.any(String),
+        // Pre-origin rows fall back to their last writer.
+        originMachineId: expect.any(String),
         tokenTotals: {
           inputTokens: 1,
           outputTokens: 2,
@@ -1867,6 +1871,7 @@ test("task timeline aggregates assigned sessions, docs, and token totals", async
           createdAt: assignedClaude.createdAt,
           session: assignedClaude,
           sessionName: null,
+          fromAnotherMachine: false,
         },
         { type: "doc", createdAt: doc.createdAt, doc, sizeBytes: null },
         {
@@ -1874,6 +1879,7 @@ test("task timeline aggregates assigned sessions, docs, and token totals", async
           createdAt: assignedCodex.createdAt,
           session: assignedCodex,
           sessionName: null,
+          fromAnotherMachine: false,
         },
       ],
       lastActivityAt: assignedCodex.createdAt,

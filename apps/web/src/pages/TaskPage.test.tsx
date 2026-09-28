@@ -5,6 +5,7 @@ import {
   fireEvent,
   render as renderIntoDocument,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -129,6 +130,7 @@ test("TaskTimelineView renders per-type SVG icons and model chips", () => {
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "session",
@@ -154,6 +156,7 @@ test("TaskTimelineView renders per-type SVG icons and model chips", () => {
           createdAt: "2026-05-29T00:02:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",
@@ -244,6 +247,7 @@ test("TaskTimelineView renders the Cursor brand mark for a cursor session", () =
           createdAt: "2026-06-11T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
     ],
     lastActivityAt: "2026-06-11T00:00:00.000Z",
@@ -310,6 +314,7 @@ test("TaskTimelineView labels uncaptured session token totals as unavailable", (
           createdAt: "2026-06-11T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
     ],
     lastActivityAt: "2026-05-29T00:00:00.000Z",
@@ -422,6 +427,7 @@ test("TaskTimelineView shows root resume commands and doc paths as copy chips", 
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",
@@ -1101,6 +1107,7 @@ function sessionTimelineItem({
   origin = "root",
   subagentType = null,
   sessionName = id,
+  fromAnotherMachine = false,
   tokenTotals,
 }: {
   id: string;
@@ -1111,6 +1118,7 @@ function sessionTimelineItem({
   origin?: "root" | "subagent" | "spawned";
   subagentType?: string | null;
   sessionName?: string | null;
+  fromAnotherMachine?: boolean;
   tokenTotals?: Partial<
     Extract<
       TaskTimeline["items"][number],
@@ -1143,8 +1151,66 @@ function sessionTimelineItem({
       createdAt,
     },
     sessionName,
+    fromAnotherMachine,
   };
 }
+
+test("TaskTimelineView marks sessions that ran on another machine", () => {
+  const timeline: TaskTimeline = {
+    ...baseTimeline(),
+    items: [
+      sessionTimelineItem({
+        id: "here",
+        createdAt: "2026-05-29T00:01:00.000Z",
+      }),
+      sessionTimelineItem({
+        id: "elsewhere",
+        createdAt: "2026-05-29T00:02:00.000Z",
+        fromAnotherMachine: true,
+      }),
+    ],
+  };
+
+  render(
+    <MemoryRouter>
+      <TaskTimelineView timeline={timeline} />
+    </MemoryRouter>,
+  );
+
+  const row = (name: string) =>
+    screen.getByText(name).closest<HTMLElement>("[data-testid='timeline-session-row']")!;
+  expect(within(row("elsewhere")).getByText("Other machine")).toBeInTheDocument();
+  expect(within(row("here")).queryByText("Other machine")).toBeNull();
+});
+
+test("TaskTimelineView offers no resume command for a session from another machine", () => {
+  const timeline: TaskTimeline = {
+    ...baseTimeline(),
+    items: [
+      sessionTimelineItem({
+        id: "here",
+        createdAt: "2026-05-29T00:01:00.000Z",
+      }),
+      sessionTimelineItem({
+        id: "elsewhere",
+        createdAt: "2026-05-29T00:02:00.000Z",
+        fromAnotherMachine: true,
+      }),
+    ],
+  };
+
+  render(
+    <MemoryRouter>
+      <TaskTimelineView timeline={timeline} />
+    </MemoryRouter>,
+  );
+
+  // Its transcript isn't on this machine, so the copied command would fail.
+  const row = (name: string) =>
+    screen.getByText(name).closest<HTMLElement>("[data-testid='timeline-session-row']")!;
+  expect(within(row("elsewhere")).queryByTestId("timeline-row-resume")).toBeNull();
+  expect(within(row("here")).getByTestId("timeline-row-resume")).toBeInTheDocument();
+});
 
 test("TaskTimelineView copies Claude and Codex resume commands from root rows", async () => {
   const timeline: TaskTimeline = {
@@ -1155,12 +1221,14 @@ test("TaskTimelineView copies Claude and Codex resume commands from root rows", 
         createdAt: "2026-05-29T00:01:00.000Z",
         tool: "claude",
         sessionName: "Named Claude session",
+        fromAnotherMachine: false,
       }),
       sessionTimelineItem({
         id: "codex-root",
         createdAt: "2026-05-29T00:02:00.000Z",
         tool: "codex",
         sessionName: null,
+        fromAnotherMachine: false,
       }),
     ],
   };
@@ -1198,6 +1266,7 @@ test("TaskTimelineView fades the timestamp and reveals Resume on hover, mirrorin
         id: "claude-root",
         createdAt: "2026-05-29T00:01:00.000Z",
         sessionName: null,
+        fromAnotherMachine: false,
       }),
     ],
   };
@@ -1355,6 +1424,7 @@ test("TaskTimelineView leads nameless child rows with their origin instead of a 
       ...overrides,
     },
     sessionName: null,
+    fromAnotherMachine: false,
   });
 
   const timeline: TaskTimeline = {
@@ -1649,6 +1719,77 @@ test("TaskTimelineView Archive menu item calls onArchive handler on click", asyn
   await user.click(screen.getByRole("button", { name: "More actions" }));
   await user.click(await screen.findByRole("button", { name: "Archive task" }));
   await waitFor(() => expect(onArchive).toHaveBeenCalledTimes(1));
+});
+
+test("TaskTimelineView offers archiving a task that looks done, acting only on click", async () => {
+  const user = userEvent.setup();
+  const onArchive = vi.fn().mockResolvedValue(undefined);
+  const onDismiss = vi.fn().mockResolvedValue(undefined);
+  const timeline = { ...baseTimeline(), archiveSuggested: true as const };
+  render(
+    <MemoryRouter>
+      <TaskTimelineView
+        timeline={timeline}
+        onArchive={onArchive}
+        onDismissArchiveSuggestion={onDismiss}
+      />
+    </MemoryRouter>,
+  );
+
+  const suggestion = screen.getByTestId("archive-suggestion");
+  expect(suggestion).toHaveTextContent("Looks done");
+  expect(onArchive).not.toHaveBeenCalled();
+
+  await user.click(
+    within(suggestion).getByRole("button", { name: "Archive task (looks done)" }),
+  );
+  await waitFor(() => expect(onArchive).toHaveBeenCalledTimes(1));
+  expect(onDismiss).not.toHaveBeenCalled();
+});
+
+test("TaskTimelineView dismisses the archive suggestion without archiving", async () => {
+  const user = userEvent.setup();
+  const onArchive = vi.fn();
+  const onDismiss = vi.fn().mockResolvedValue(undefined);
+  const timeline = { ...baseTimeline(), archiveSuggested: true as const };
+  render(
+    <MemoryRouter>
+      <TaskTimelineView
+        timeline={timeline}
+        onArchive={onArchive}
+        onDismissArchiveSuggestion={onDismiss}
+      />
+    </MemoryRouter>,
+  );
+
+  await user.click(
+    screen.getByRole("button", { name: "Dismiss archive suggestion" }),
+  );
+  await waitFor(() => expect(onDismiss).toHaveBeenCalledTimes(1));
+  expect(onArchive).not.toHaveBeenCalled();
+});
+
+test("TaskTimelineView shows no archive suggestion without the flag or once archived", () => {
+  const plain = renderToStaticMarkup(
+    <MemoryRouter>
+      <TaskTimelineView timeline={baseTimeline()} onArchive={() => {}} />
+    </MemoryRouter>,
+  );
+  expect(plain).not.toContain("archive-suggestion");
+
+  const archived = renderToStaticMarkup(
+    <MemoryRouter>
+      <TaskTimelineView
+        timeline={{
+          ...baseTimeline({ archivedAt: "2026-06-01T00:00:00.000Z" }),
+          archiveSuggested: true,
+        }}
+        onArchive={() => {}}
+        onUnarchive={() => {}}
+      />
+    </MemoryRouter>,
+  );
+  expect(archived).not.toContain("archive-suggestion");
 });
 
 test("TaskTimelineView Unarchive menu item calls onUnarchive handler on click", async () => {
@@ -2066,6 +2207,7 @@ test("TaskTimelineView renders a single continuous timeline spine across items",
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",
@@ -2101,6 +2243,7 @@ test("TaskTimelineView renders a single continuous timeline spine across items",
           createdAt: "2026-05-29T00:03:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
     ],
   };
@@ -2175,6 +2318,7 @@ function filterableTimeline(): TaskTimeline {
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",
@@ -2909,4 +3053,90 @@ describe("TaskPage", () => {
       expect(archiveCall?.[1]?.method).toBe("POST");
     });
   });
+});
+
+test("TaskTimelineView marks a promoted doc as living in the repo", () => {
+  const timeline: TaskTimeline = {
+    task: {
+      id: "task-1",
+      slug: "usable-v1",
+      title: "usable v1",
+      projectRoot: "/work/trace-v2",
+      projectId: "project-trace-v2",
+      projectSlug: "trace-v2",
+      createdAt: "2026-05-29T00:00:00.000Z",
+      archivedAt: null,
+      pinnedAt: null,
+    },
+    items: [
+      {
+        type: "doc",
+        createdAt: "2026-05-29T00:03:00.000Z",
+        doc: {
+          taskId: "task-1",
+          path: "/work/trace-v2/docs/plan.md",
+          createdAt: "2026-05-29T00:03:00.000Z",
+          promoted: {
+            repoPath: "docs/plan.md",
+            pointerPath: "/trace/tasks/usable-v1/docs/plan.md.eqnx-pointer.json",
+            missing: false,
+          },
+        },
+        sizeBytes: 12,
+      },
+      {
+        type: "doc",
+        createdAt: "2026-05-29T00:04:00.000Z",
+        doc: {
+          taskId: "task-1",
+          path: "/work/trace-v2/docs/gone.md",
+          createdAt: "2026-05-29T00:04:00.000Z",
+          promoted: {
+            repoPath: "docs/gone.md",
+            pointerPath: "/trace/tasks/usable-v1/docs/gone.md.eqnx-pointer.json",
+            missing: true,
+          },
+        },
+        sizeBytes: null,
+      },
+      {
+        type: "doc",
+        createdAt: "2026-05-29T00:05:00.000Z",
+        doc: {
+          taskId: "task-1",
+          path: "/work/trace-v2/.worktrees/other/docs/notes.md",
+          createdAt: "2026-05-29T00:05:00.000Z",
+          promoted: {
+            repoPath: "docs/notes.md",
+            pointerPath: "/trace/tasks/usable-v1/docs/notes.md.eqnx-pointer.json",
+            missing: false,
+            otherCheckout: "/work/trace-v2/.worktrees/other",
+          },
+        },
+        sizeBytes: 12,
+      },
+    ],
+    lastActivityAt: "2026-05-29T00:00:00.000Z",
+    tokenTotals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      totalTokens: 0,
+    },
+  };
+
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <TaskTimelineView timeline={timeline} />
+    </MemoryRouter>,
+  );
+
+  expect(html).toContain('title="In the project repo at docs/plan.md"');
+  expect(html).toContain(">In repo<");
+  expect(html).toContain(">Not on this machine<");
+  expect(html).toContain(
+    'title="Read from another checkout at /work/trace-v2/.worktrees/other; read-only here"',
+  );
+  expect(html).toContain(">Other checkout<");
 });

@@ -1,4 +1,9 @@
 export { openTraceStore, resolveTaskDocsDir } from "./store.ts";
+export {
+  DOC_POINTER_SUFFIX,
+  isDocPointerPath,
+  parseDocPointer,
+} from "./doc-pointer.ts";
 export { compareSyncRows, synchronize } from "./sync.ts";
 export {
   createKeyWrapper,
@@ -111,6 +116,8 @@ export { resolveStateAuthor } from "./state-author.ts";
 export { generatePlaceholderSlug, slugify } from "./slug.ts";
 export { resolveDatabasePath } from "./db-path.ts";
 export { parseStateMd } from "./state-parser.ts";
+export { declaresDone, suggestsArchive } from "./archive-suggestion.ts";
+export type { ArchiveSuggestionInput } from "./archive-suggestion.ts";
 export type { ParsedStateMd } from "./state-parser.ts";
 export { formatStateMd } from "./state-format.ts";
 export type { StateMdDraft } from "./state-format.ts";
@@ -182,6 +189,7 @@ export type { DocFingerprintInput, ProseStamp } from "./prose-fingerprint.ts";
 export type {
   ActiveTask,
   AddTaskDocOptions,
+  PromoteTaskDocOptions,
   ContextTokens,
   GitWorkContext,
   LastWorkedOn,
@@ -201,6 +209,7 @@ export type {
   StateAuthor,
   Task,
   TaskDoc,
+  PromotedDoc,
   TaskStore,
   TaskSummary,
   TaskTimeline,

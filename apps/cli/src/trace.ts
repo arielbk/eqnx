@@ -183,7 +183,7 @@ function failure(stderr: string, exitCode = 2): CommandResult {
 }
 
 const COMPACT_USAGE =
-  "Usage: eqnx init | eqnx setup --tool claude [--yes] | eqnx update [--yes] | eqnx board [--local] | eqnx serve | eqnx pair [<code>|--open] | eqnx connection <install|status|restart|uninstall|run|pair [<code>|--open]|browsers|revoke <id>|reset> | eqnx export [task] [--include-transcripts] [--out <path>] | eqnx login | eqnx logout | eqnx whoami | eqnx sync | eqnx key show | eqnx config <get|set|unset> <server-url|auto-sync> ... | eqnx hook <session-start|subagent-stop> | eqnx task <create|update|capture|show|list|add-doc|update-doc|timeline> ... | eqnx project merge <duplicate-slug> <canonical-slug> | eqnx session <register|assign|active-task|list|scan> ... | eqnx skill <work-on-task|re-enter|recall-candidates|docs-dir> ...";
+  "Usage: eqnx init | eqnx setup --tool claude [--yes] | eqnx update [--yes] | eqnx board [--local] | eqnx serve | eqnx pair [<code>|--open] | eqnx connection <install|status|restart|uninstall|run|pair [<code>|--open]|browsers|revoke <id>|reset> | eqnx export [task] [--include-transcripts] [--out <path>] | eqnx login | eqnx logout | eqnx whoami | eqnx sync | eqnx key show | eqnx config <get|set|unset> <server-url|auto-sync> ... | eqnx hook <session-start|subagent-stop> | eqnx task <create|update|capture|show|list|add-doc|update-doc|promote-doc|timeline> ... | eqnx project merge <duplicate-slug> <canonical-slug> | eqnx session <register|assign|active-task|list|scan> ... | eqnx skill <work-on-task|re-enter|recall-candidates|docs-dir> ...";
 
 function usage(): CommandResult {
   return failure(COMPACT_USAGE);

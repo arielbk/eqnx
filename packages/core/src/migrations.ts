@@ -75,6 +75,16 @@ export const migrationJournal = {
       tag: "0014_session_git_context",
       breakpoints: false,
     },
+    {
+      when: 1790500000000,
+      tag: "0015_session_origin_machine",
+      breakpoints: true,
+    },
+    {
+      when: 1790600000000,
+      tag: "0016_task_archive_suggestion_dismissal",
+      breakpoints: false,
+    },
   ],
 } as const;
 
@@ -106,4 +116,15 @@ export const migrationSqlByTag: Record<string, string> = {
     "CREATE TABLE `sync_meta` (`key` text PRIMARY KEY NOT NULL, `value` text NOT NULL);\n--> statement-breakpoint\nALTER TABLE `tasks` ADD `updated_at` text DEFAULT '' NOT NULL;\n--> statement-breakpoint\nALTER TABLE `tasks` ADD `machine_id` text DEFAULT '' NOT NULL;\n--> statement-breakpoint\nALTER TABLE `sessions` ADD `updated_at` text DEFAULT '' NOT NULL;\n--> statement-breakpoint\nALTER TABLE `sessions` ADD `machine_id` text DEFAULT '' NOT NULL;\n--> statement-breakpoint\nUPDATE `tasks` SET `updated_at` = `created_at`;\n--> statement-breakpoint\nUPDATE `sessions` SET `updated_at` = `created_at`;\n",
   "0014_session_git_context":
     "ALTER TABLE `sessions` ADD `git_branch` text;\n--> statement-breakpoint\nALTER TABLE `sessions` ADD `git_worktree_label` text;\n--> statement-breakpoint\nALTER TABLE `sessions` ADD `git_worktree_path` text;\n",
+  // `machine_id` is the row's last writer (sync's tiebreak), so a re-bind on
+  // another machine moves it. The origin is set once at creation and never
+  // rewritten. Existing rows take their current last writer — the best guess
+  // there is; a still-blank `machine_id` stays NULL and reads fall back.
+  "0015_session_origin_machine":
+    "ALTER TABLE `sessions` ADD `origin_machine_id` text;\n--> statement-breakpoint\nUPDATE `sessions` SET `origin_machine_id` = NULLIF(`machine_id`, '');\n",
+  // When the user last dismissed the board's "looks done — archive?" offer.
+  // Machine-local: it never enters the sync payload, so a dismissal neither
+  // moves the row's last-write-wins clock nor travels to other machines.
+  "0016_task_archive_suggestion_dismissal":
+    "ALTER TABLE `tasks` ADD `archive_suggestion_dismissed_at` text;\n",
 };

@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { freshTokenTotal, type TaskSummary } from "@trace/core/browser";
 import type { SessionTool } from "@trace/core/browser";
 import { ReEnterButton } from "./ReEnterButton.tsx";
+import { ArchiveSuggestionChip } from "./ArchiveSuggestion.tsx";
 import {
   ArchiveIcon,
   PinIcon,
@@ -20,11 +21,12 @@ import {
   truncateId,
 } from "../format.ts";
 
-// Archive interaction timing. ARCHIVE_EXIT_MS must stay in sync with the
-// `duration-350` exit transition on the row's className below.
-const ARCHIVE_SETTLE_MS = 2200;
-const ARCHIVE_EXIT_MS = 350;
-const ARCHIVE_SUCCESS_HOLD_MS = ARCHIVE_SETTLE_MS - ARCHIVE_EXIT_MS;
+// Archive interaction timing. ARCHIVE_EXIT_MS must stay in sync with
+// `--row-collapse-dur` in index.css: the archive is only committed (and the
+// row only leaves the list) once the collapse has fully closed the gap.
+export const ARCHIVE_SETTLE_MS = 2200;
+export const ARCHIVE_EXIT_MS = 350;
+export const ARCHIVE_SUCCESS_HOLD_MS = ARCHIVE_SETTLE_MS - ARCHIVE_EXIT_MS;
 
 export function TaskRow({
   task,
@@ -32,15 +34,24 @@ export function TaskRow({
   onUnarchive,
   onPin,
   onUnpin,
+  onDismissArchiveSuggestion,
   linkToDetail = true,
+  collapseOnArchive = true,
 }: {
   task: TaskSummary;
   onArchive?: (task: TaskSummary) => void | Promise<void>;
   onUnarchive?: (task: TaskSummary) => void | Promise<void>;
   onPin?: (task: TaskSummary) => void | Promise<void>;
   onUnpin?: (task: TaskSummary) => void | Promise<void>;
+  onDismissArchiveSuggestion?: (task: TaskSummary) => void | Promise<void>;
   /** False where the data source exposes no task detail view to link into. */
   linkToDetail?: boolean;
+  /**
+   * Whether archiving takes the row out of the list. False where archived
+   * tasks stay visible ("Show archived"), so the row settles into its archived
+   * look in place instead of collapsing away and springing back.
+   */
+  collapseOnArchive?: boolean;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [archivePhase, setArchivePhase] = useState<
@@ -50,6 +61,13 @@ export function TaskRow({
   const archiveCommitTimer = useRef<number | null>(null);
   const untitled = isUntitled(task.title);
   const archived = task.archivedAt !== null;
+  const [prevArchived, setPrevArchived] = useState(archived);
+  // Once the archive lands and the row is still mounted (archived rows shown),
+  // drop the pending-archive phase so the row reads as a plain archived row.
+  if (archived !== prevArchived) {
+    setPrevArchived(archived);
+    if (archived) setArchivePhase("idle");
+  }
   const pinned = task.pinnedAt !== null;
   const projectName = task.projectSlug;
   const archiveLabel = `Archive ${untitled ? "untitled task" : task.title}`;
@@ -116,10 +134,12 @@ export function TaskRow({
     if (!onArchive) return;
 
     setArchivePhase("success");
-    archiveExitTimer.current = window.setTimeout(() => {
-      archiveExitTimer.current = null;
-      setArchivePhase("removing");
-    }, ARCHIVE_SUCCESS_HOLD_MS);
+    if (collapseOnArchive) {
+      archiveExitTimer.current = window.setTimeout(() => {
+        archiveExitTimer.current = null;
+        setArchivePhase("removing");
+      }, ARCHIVE_SUCCESS_HOLD_MS);
+    }
     archiveCommitTimer.current = window.setTimeout(() => {
       archiveCommitTimer.current = null;
       void Promise.resolve(onArchive(task)).catch(() =>
@@ -131,126 +151,149 @@ export function TaskRow({
   return (
     <li
       className={cn(
-        "task-row flex items-center gap-row-gap px-3 -mx-3 py-row-y relative hover:bg-surface overflow-hidden max-h-32 transition-all duration-350",
+        "task-row t-row-collapse -mx-3 hover:bg-surface",
         archived && "task-row-archived opacity-60",
-        archivePhase === "removing" &&
-          "opacity-0 max-h-0 py-0 -translate-y-1 pointer-events-none",
+        archivePhase === "removing" && "is-collapsed",
       )}
+      data-archive-phase={archivePhase}
+      aria-hidden={archivePhase === "removing" || undefined}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Left: title row + description */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-chip-gap flex-wrap">
-          {linkToDetail ? (
-            <Link
-              to={`/task/${task.slug}`}
-              className="no-underline text-inherit hover:text-accent min-w-0"
-            >
-              {title}
-            </Link>
-          ) : (
-            title
-          )}
-          <span className="task-row-project flex-shrink-0 font-mono text-chip px-1.5 py-px rounded bg-chip-bg text-chip-text border border-border whitespace-nowrap">
-            {projectName}
-          </span>
-          {archived && (
-            <span className="archived-badge flex-shrink-0 font-mono text-badge font-bold uppercase px-1.5 py-px rounded text-text-muted border border-border whitespace-nowrap">
-              Archived
-            </span>
-          )}
-        </div>
-        {!untitled && task.description ? (
-          <p className="task-row-description mt-1.5 mb-0 text-text-muted text-caption leading-normal line-clamp-2 max-w-row-description">
-            {task.description}
-          </p>
-        ) : null}
-      </div>
-
-      {/* Right: agent avatars + docs icon + token count + time */}
-      <div
-        className={cn(
-          "task-row-meta t-text-swap flex w-row-meta flex-shrink-0 flex-col items-end gap-1",
-          (isHovered || archivePhase !== "idle") &&
-            "is-exit opacity-0 pointer-events-none",
-        )}
-      >
-        <div className="flex w-full items-center justify-end gap-3 min-w-0">
-          <AgentAvatars agentTools={task.agentTools} hasDocs={task.hasDocs} />
-          <span
-            className="font-mono text-meta text-text-muted tabular-nums whitespace-nowrap"
-            title={formatTokenBreakdown(task.tokenTotals)}
-          >
-            {formatTokensCompact(freshTokenTotal(task.tokenTotals))}
-          </span>
-        </div>
-        <span className="block w-full font-mono text-row-time text-text whitespace-nowrap text-right">
-          {formatRelativeTime(task.lastActivityAt)}
-        </span>
-      </div>
-
-      {/* Row actions (visible on hover) */}
-      <div
-        className={cn(
-          "task-row-actions t-text-swap absolute top-1/2 right-3 -translate-y-1/2 inline-flex items-center gap-2",
-          isHovered || archivePhase !== "idle"
-            ? "opacity-100 pointer-events-auto"
-            : "is-exit opacity-0 focus-within:opacity-100 pointer-events-none",
-        )}
-      >
-        <ReEnterButton
-          title={task.title}
-          slug={task.slug}
-          className="task-row-action pointer-events-auto"
-        />
-        {!archived && (pinned ? onUnpin : onPin) ? (
-          <button
-            type="button"
-            className={cn(
-              "task-row-action inline-flex items-center justify-center size-row-action p-0 rounded-lg border border-border bg-surface text-text-muted cursor-pointer hover:text-accent hover:border-border-strong pointer-events-auto",
-              pinned && "text-accent",
-            )}
-            aria-label={pinned ? unpinLabel : pinLabel}
-            onClick={() => runRowAction(pinned ? onUnpin : onPin, task)}
-          >
-            {pinned ? <UnpinIcon /> : <PinIcon />}
-          </button>
-        ) : null}
-        {archived && onUnarchive ? (
-          <button
-            type="button"
-            className="task-row-action inline-flex items-center justify-center size-row-action p-0 rounded-lg border border-border bg-surface text-text-muted cursor-pointer hover:text-accent hover:border-border-strong pointer-events-auto"
-            aria-label={unarchiveLabel}
-            onClick={() => runRowAction(onUnarchive, task)}
-          >
-            <UnarchiveIcon />
-          </button>
-        ) : onArchive ? (
-          <button
-            type="button"
-            className={cn(
-              "task-row-action inline-flex items-center justify-center size-row-action p-0 rounded-lg border border-border bg-surface text-text-muted cursor-pointer hover:text-accent hover:border-border-strong pointer-events-auto transition-colors",
-              archivePhase !== "idle" &&
-                "text-accent border-border-strong bg-accent-soft",
-            )}
-            aria-label={archivePhase !== "idle" ? unarchiveLabel : archiveLabel}
-            onClick={handleArchiveClick}
-          >
-            <span
-              className="t-icon-swap inline-grid size-4 place-items-center"
-              data-state={archivePhase !== "idle" ? "b" : "a"}
-              aria-hidden="true"
-            >
-              <span className="t-icon inline-flex" data-icon="a">
-                <ArchiveIcon />
+      <div className="t-row-collapse-inner">
+        <div className="task-row-body relative flex items-center gap-row-gap px-3 py-row-y">
+          {/* Left: title row + description */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-chip-gap flex-wrap">
+              {linkToDetail ? (
+                <Link
+                  to={`/task/${task.slug}`}
+                  className="no-underline text-inherit hover:text-accent min-w-0"
+                >
+                  {title}
+                </Link>
+              ) : (
+                title
+              )}
+              <span className="task-row-project flex-shrink-0 font-mono text-chip px-1.5 py-px rounded bg-chip-bg text-chip-text border border-border whitespace-nowrap">
+                {projectName}
               </span>
-              <span className="t-icon inline-flex" data-icon="b">
-                <SuccessCheckIcon shown={archivePhase !== "idle"} />
+              {task.archiveSuggested &&
+              !archived &&
+              archivePhase === "idle" &&
+              onArchive &&
+              onDismissArchiveSuggestion ? (
+                <ArchiveSuggestionChip
+                  taskLabel={untitled ? "untitled task" : task.title}
+                  onArchive={handleArchiveClick}
+                  onDismiss={() =>
+                    runRowAction(onDismissArchiveSuggestion, task)
+                  }
+                />
+              ) : null}
+              {archived && (
+                <span className="archived-badge flex-shrink-0 font-mono text-badge font-bold uppercase px-1.5 py-px rounded text-text-muted border border-border whitespace-nowrap">
+                  Archived
+                </span>
+              )}
+            </div>
+            {!untitled && task.description ? (
+              <p className="task-row-description mt-1.5 mb-0 text-text-muted text-caption leading-normal line-clamp-2 max-w-row-description">
+                {task.description}
+              </p>
+            ) : null}
+          </div>
+
+          {/* Right: agent avatars + docs icon + token count + time */}
+          <div
+            className={cn(
+              "task-row-meta t-text-swap flex w-row-meta flex-shrink-0 flex-col items-end gap-1",
+              (isHovered || archivePhase !== "idle") &&
+                "is-exit opacity-0 pointer-events-none",
+            )}
+          >
+            <div className="flex w-full items-center justify-end gap-3 min-w-0">
+              <AgentAvatars
+                agentTools={task.agentTools}
+                hasDocs={task.hasDocs}
+              />
+              <span
+                className="font-mono text-meta text-text-muted tabular-nums whitespace-nowrap"
+                title={formatTokenBreakdown(task.tokenTotals)}
+              >
+                {formatTokensCompact(freshTokenTotal(task.tokenTotals))}
               </span>
+            </div>
+            <span className="block w-full font-mono text-row-time text-text whitespace-nowrap text-right">
+              {formatRelativeTime(task.lastActivityAt)}
             </span>
-          </button>
-        ) : null}
+          </div>
+
+          {/* Row actions (visible on hover) */}
+          <div
+            className={cn(
+              "task-row-actions t-text-swap absolute top-1/2 right-3 -translate-y-1/2 inline-flex items-center gap-2",
+              isHovered || archivePhase !== "idle"
+                ? "opacity-100 pointer-events-auto"
+                : "is-exit opacity-0 focus-within:opacity-100 pointer-events-none",
+            )}
+          >
+            <ReEnterButton
+              title={task.title}
+              slug={task.slug}
+              className="task-row-action pointer-events-auto"
+            />
+            {!archived && (pinned ? onUnpin : onPin) ? (
+              <button
+                type="button"
+                className={cn(
+                  "task-row-action inline-flex items-center justify-center size-row-action p-0 rounded-lg border border-border bg-surface text-text-muted cursor-pointer hover:text-accent hover:border-border-strong pointer-events-auto",
+                  pinned && "text-accent",
+                )}
+                aria-label={pinned ? unpinLabel : pinLabel}
+                onClick={() => runRowAction(pinned ? onUnpin : onPin, task)}
+              >
+                {pinned ? <UnpinIcon /> : <PinIcon />}
+              </button>
+            ) : null}
+            {archived && onUnarchive ? (
+              <button
+                type="button"
+                className="task-row-action inline-flex items-center justify-center size-row-action p-0 rounded-lg border border-border bg-surface text-text-muted cursor-pointer hover:text-accent hover:border-border-strong pointer-events-auto"
+                aria-label={unarchiveLabel}
+                onClick={() => runRowAction(onUnarchive, task)}
+              >
+                <UnarchiveIcon />
+              </button>
+            ) : onArchive ? (
+              <button
+                type="button"
+                className={cn(
+                  "task-row-action inline-flex items-center justify-center size-row-action p-0 rounded-lg border border-border bg-surface text-text-muted cursor-pointer hover:text-accent hover:border-border-strong pointer-events-auto transition-colors",
+                  archivePhase !== "idle" &&
+                    "text-accent border-border-strong bg-accent-soft",
+                )}
+                aria-label={
+                  archivePhase !== "idle" ? unarchiveLabel : archiveLabel
+                }
+                onClick={handleArchiveClick}
+              >
+                <span
+                  className="t-icon-swap inline-grid size-4 place-items-center"
+                  data-state={archivePhase !== "idle" ? "b" : "a"}
+                  aria-hidden="true"
+                >
+                  <span className="t-icon inline-flex" data-icon="a">
+                    <ArchiveIcon />
+                  </span>
+                  <span className="t-icon inline-flex" data-icon="b">
+                    <SuccessCheckIcon shown={archivePhase !== "idle"} />
+                  </span>
+                </span>
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
     </li>
   );

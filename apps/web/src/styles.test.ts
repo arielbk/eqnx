@@ -43,7 +43,9 @@ test("the account menu's sync spinner is silenced under reduced motion", () => {
   const reducedMotionBlock = css.slice(
     css.indexOf("@media (prefers-reduced-motion: reduce)"),
   );
-  expect(reducedMotionBlock).toMatch(/\.t-sync-spinner\s*{[^}]*animation:\s*none/);
+  expect(reducedMotionBlock).toMatch(
+    /\.t-sync-spinner\s*{[^}]*animation:\s*none/,
+  );
 });
 
 test("the success check the unlock beat draws is silenced the same way", () => {
@@ -54,5 +56,22 @@ test("the success check the unlock beat draws is silenced the same way", () => {
   // opacity override beside the stopped animation.
   expect(reducedMotionBlock).toMatch(
     /\.t-success-check\s*{[^}]*animation:\s*none[^}]*opacity:\s*1/,
+  );
+});
+
+test("the archive row collapse animates real height and is silenced under reduced motion", () => {
+  // max-height overshot the row and left its padding behind, so the gap below
+  // snapped shut on unmount; the grid track collapses from the true height.
+  const rule = css.match(/^\.t-row-collapse\s*{[^}]*}/m)?.[0] ?? "";
+  expect(rule).toMatch(/grid-template-rows:\s*1fr/);
+  expect(rule).not.toMatch(/max-height/);
+  const collapsed =
+    css.match(/^\.t-row-collapse\.is-collapsed\s*{[^}]*}/m)?.[0] ?? "";
+  expect(collapsed).toMatch(/grid-template-rows:\s*0fr/);
+  const reducedMotionBlock = css.slice(
+    css.indexOf("@media (prefers-reduced-motion: reduce)"),
+  );
+  expect(reducedMotionBlock).toMatch(
+    /\.t-row-collapse\s*{[^}]*transition:\s*none/,
   );
 });

@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { MouseEvent, RefObject } from "react";
+import { useLayoutEffect, useRef, type MouseEvent, type RefObject } from "react";
 import { truncatePath } from "../format.ts";
 import {
   HttpError,
@@ -24,6 +24,7 @@ export function DocViewerSheet({
   onOpenChange,
   onNavigateDocRoute,
   triggerRef,
+  promoted,
 }: {
   taskRef: string;
   docPath: string;
@@ -31,10 +32,15 @@ export function DocViewerSheet({
   onOpenChange: (open: boolean) => void;
   onNavigateDocRoute?: (route: string) => void;
   triggerRef: RefObject<HTMLElement | null>;
+  /** Set when the doc was promoted into the project repo. */
+  promoted?: { repoPath: string; missing: boolean; otherCheckout?: string };
 }) {
   const query = useDocContents(taskRef, docPath);
   const toggleCheckbox = useToggleCheckbox();
-  const canEditDoc = useTraceDataSource().capabilities.docEdits;
+  // A copy borrowed from another checkout may be another branch's version, so
+  // it is read-only here just like a source with nowhere to write.
+  const canEditDoc =
+    useTraceDataSource().capabilities.docEdits && !promoted?.otherCheckout;
 
   return (
     <Sheet
@@ -43,9 +49,33 @@ export function DocViewerSheet({
       description={`Read-only contents of ${docPath}`}
       returnFocusTo={triggerRef}
     >
+      {promoted ? (
+        <p
+          data-testid="doc-viewer-promoted"
+          className="m-0 mb-3 text-xs font-bold uppercase tracking-wide text-text-muted"
+        >
+          Lives in the project repo at{" "}
+          <span className="font-mono normal-case">{promoted.repoPath}</span>
+          {promoted.otherCheckout ? (
+            <>
+              {" "}
+              · Read from another checkout at{" "}
+              <span className="font-mono normal-case">
+                {promoted.otherCheckout}
+              </span>
+              , read-only here
+            </>
+          ) : null}
+        </p>
+      ) : null}
       <DocViewerBody
         query={query}
+        promoted={promoted}
         onClick={(event) => {
+          // First, so a code block nested in a task-list line copies instead of
+          // toggling the line's checkbox.
+          if (copyCodeFromClick(event)) return;
+
           const checkbox = checkboxToggleFromClick(event);
           if (checkbox) {
             const { input, index, checked } = checkbox;
@@ -85,10 +115,24 @@ export function DocViewerSheet({
 function DocViewerBody({
   query,
   onClick,
+  promoted,
 }: {
   query: UseQueryResult<DocContents, Error>;
   onClick?: (event: MouseEvent<HTMLDivElement>) => void;
+  promoted?: { repoPath: string; missing: boolean };
 }) {
+  const proseRef = useRef<HTMLDivElement>(null);
+  const html = query.data?.contentType.startsWith("text/html")
+    ? query.data.body
+    : null;
+
+  // The doc arrives as server-rendered HTML, so React can't own children inside
+  // it. Add the copy buttons after each render of new HTML; clicks reach them
+  // through the container's delegated handler, like the checkboxes.
+  useLayoutEffect(() => {
+    if (html !== null && proseRef.current) addCopyButtons(proseRef.current);
+  }, [html]);
+
   if (query.isPending) {
     return <p className="text-text-muted">Loading…</p>;
   }
@@ -96,17 +140,18 @@ function DocViewerBody({
   if (query.isError) {
     return (
       <p role="alert" className="text-text-muted">
-        {docErrorMessage(query.error)}
+        {docErrorMessage(query.error, promoted)}
       </p>
     );
   }
 
-  if (query.data.contentType.startsWith("text/html")) {
+  if (html !== null) {
     return (
       <div
+        ref={proseRef}
         className="doc-viewer-prose text-base text-text-muted leading-relaxed"
         onClick={onClick}
-        dangerouslySetInnerHTML={{ __html: query.data.body }}
+        dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   }
@@ -160,6 +205,44 @@ function docLinkRouteFromClick(
   });
 }
 
+const COPY_LABEL = "Copy";
+const COPIED_LABEL = "Copied";
+const COPIED_RESET_MS = 1200;
+
+function addCopyButtons(container: HTMLElement): void {
+  for (const pre of container.querySelectorAll("pre")) {
+    if (pre.querySelector(":scope > [data-copy-code]")) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.copyCode = "";
+    button.className = "doc-code-copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.textContent = COPY_LABEL;
+    pre.append(button);
+  }
+}
+
+function copyCodeFromClick(event: MouseEvent<HTMLDivElement>): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const button = target.closest("[data-copy-code]");
+  if (!(button instanceof HTMLButtonElement)) return false;
+
+  // Read the <code> rather than the <pre>, which also holds the button's label.
+  const pre = button.closest("pre");
+  const text = pre?.querySelector("code")?.textContent ?? "";
+  // Clipboard may be unavailable (insecure context, denied permission); still
+  // confirm, matching useClipboardCopy.
+  navigator.clipboard?.writeText(text).catch(() => {});
+
+  button.textContent = COPIED_LABEL;
+  window.clearTimeout(Number(button.dataset.resetTimer));
+  button.dataset.resetTimer = String(
+    window.setTimeout(() => (button.textContent = COPY_LABEL), COPIED_RESET_MS),
+  );
+  return true;
+}
+
 function checkboxToggleFromClick(
   event: MouseEvent<HTMLDivElement>,
 ): { input: HTMLInputElement; index: number; checked: boolean } | null {
@@ -196,8 +279,16 @@ function readCheckbox(
   return { input, index, checked };
 }
 
-function docErrorMessage(error: Error): string {
+function docErrorMessage(
+  error: Error,
+  promoted?: { repoPath: string },
+): string {
   if (error instanceof HttpError) {
+    if (error.status === 404 && promoted) {
+      // The pointer synced but the repo file did not: it arrives with the
+      // checkout (a pull, the right branch), not with EQNX.
+      return `This document was promoted to ${promoted.repoPath} in the project repo, and that file is not on this machine.`;
+    }
     if (error.status === 404) return "This document could not be found.";
     if (error.status === 400) {
       return "This document path is outside the task's docs directory.";

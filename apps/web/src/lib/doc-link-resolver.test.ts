@@ -70,3 +70,23 @@ describe("resolveTaskDocLink", () => {
     expect(resolve("file:///etc/passwd.md")).toBeNull();
   });
 });
+
+describe("resolveTaskDocLink with a promoted doc", () => {
+  // The board lists pointer paths first: they sit in the task docs dir, so
+  // they anchor the docs root even when the repo file also has a /docs/ path.
+  const known = [
+    "/home/u/.trace/tasks/demo/docs/plan.md.eqnx-pointer.json",
+    "/repo/docs/plan.md",
+    "/home/u/.trace/tasks/demo/docs/spec.md",
+  ];
+  const fromState = (href: string) =>
+    resolveTaskDocLink({ href, baseDocPath: "state.md", knownDocPaths: known, taskRef: "demo task" });
+
+  test("state.md footer links still resolve against the task docs dir", () => {
+    expect(fromState("spec.md")).toBe(route("/home/u/.trace/tasks/demo/docs/spec.md"));
+  });
+
+  test("a footer link to the promoted doc's repo file resolves to it", () => {
+    expect(fromState("../../../../../../repo/docs/plan.md")).toBe(route("/repo/docs/plan.md"));
+  });
+});

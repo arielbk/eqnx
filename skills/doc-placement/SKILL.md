@@ -84,6 +84,20 @@ eqnx task update-doc <slug> <path> --description "<one-line description>"
 Pass `--title`/`--description` to set a field, `--title ""`/`--description ""`
 to clear it; omitted flags are left untouched.
 
+### Promoting a document into the repo
+
+When a task doc has outgrown the task — a spec or ADR the whole team should
+see — move it into the project repo instead of copying it:
+
+```sh
+eqnx task promote-doc <slug> <path> [--to <repo-path>]
+```
+
+The file moves to `<repo>/docs/<name>` (or `--to`, relative to the project
+root; end it with `/` for a directory), and the task keeps a pointer so the
+doc stays in its manifest and on the board. It refuses to overwrite an existing
+file. After promotion, edit the repo file; there is no second copy.
+
 ## Notes
 
 - `docs-dir` resolves the directory from the live session→task binding, not

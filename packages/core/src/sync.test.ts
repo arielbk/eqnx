@@ -883,3 +883,133 @@ test("deferred document manifests report partial recovery and retain their curso
     expect(store.syncCursor("documents")).toBeNull();
   } finally { store.close(); }
 });
+
+describe("session origin machine", () => {
+  test("a session keeps the machine it ran on after another machine re-binds it", async () => {
+    const server = new MemoryTransport();
+    const first = openTraceStore(database("origin-first"));
+    const second = openTraceStore(database("origin-second"));
+    const checkout = first.createTask("Checkout");
+    const billing = first.createTask("Billing");
+    first.registerSession({
+      id: "session-a",
+      transcriptPath: "/machine-a/transcript.jsonl",
+      tool: "claude",
+    });
+    first.assignSession("session-a", checkout.id);
+    await synchronize(first, server);
+    await synchronize(second, server);
+
+    // Machine B moves the session: it becomes the row's last writer, but the
+    // session still ran — and its transcript still lives — on machine A.
+    second.assignSession("session-a", billing.id);
+    await synchronize(second, server);
+    await synchronize(first, server);
+
+    for (const store of [first, second]) {
+      expect(store.getSession("session-a")).toMatchObject({
+        taskId: billing.id,
+        machineId: second.getMachineId(),
+        originMachineId: first.getMachineId(),
+      });
+    }
+
+    first.close();
+    second.close();
+  });
+
+  test("a legacy last-write without an origin keeps the captured one", () => {
+    const store = openTraceStore(database("origin-legacy-lww"));
+    store.registerSession({
+      id: "session-a",
+      transcriptPath: "/machine-a/transcript.jsonl",
+      tool: "codex",
+    });
+
+    const [row] = store.syncSnapshot().sessions;
+    expect(row?.originMachineId).toBe(store.getMachineId());
+    const legacy = {
+      ...row!,
+      updatedAt: new Date(Date.parse(row!.updatedAt) + 10).toISOString(),
+      machineId: "legacy-machine",
+    };
+    delete legacy.originMachineId;
+
+    store.mergeSyncPayload({ tasks: [], sessions: [legacy] });
+
+    expect(store.getSession("session-a")?.originMachineId).toBe(
+      store.getMachineId(),
+    );
+    store.close();
+  });
+
+  test("a legacy row with no origin falls back to its last writer", () => {
+    const store = openTraceStore(database("origin-legacy-insert"));
+    const createdAt = "2026-08-01T00:00:00.000Z";
+    store.mergeSyncPayload({
+      tasks: [],
+      sessions: [
+        {
+          id: "session-legacy",
+          transcriptPath: "/old/transcript.jsonl",
+          tool: "claude",
+          model: null,
+          title: null,
+          taskId: null,
+          parentSessionId: null,
+          origin: "root",
+          subagentType: null,
+          agentId: null,
+          createdAt,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          totalTokens: 0,
+          updatedAt: createdAt,
+          machineId: "legacy-machine",
+        },
+      ],
+    });
+
+    expect(store.getSession("session-legacy")?.originMachineId).toBe(
+      "legacy-machine",
+    );
+    store.close();
+  });
+
+  test("the timeline flags sessions that ran on another machine", async () => {
+    const server = new MemoryTransport();
+    const first = openTraceStore(database("origin-timeline-first"));
+    const second = openTraceStore(database("origin-timeline-second"));
+    const task = first.createTask("Checkout");
+    first.registerSession({
+      id: "from-a",
+      transcriptPath: "/machine-a/a.jsonl",
+      tool: "claude",
+    });
+    first.assignSession("from-a", task.id);
+    await synchronize(first, server);
+    await synchronize(second, server);
+    second.registerSession({
+      id: "from-b",
+      transcriptPath: "/machine-b/b.jsonl",
+      tool: "codex",
+    });
+    second.assignSession("from-b", task.id);
+
+    const flags = Object.fromEntries(
+      second
+        .getTaskTimeline(task.id)!
+        .items.flatMap((item) =>
+          item.type === "session"
+            ? [[item.session.id, item.fromAnotherMachine]]
+            : [],
+        ),
+    );
+    expect(flags).toEqual({ "from-a": true, "from-b": false });
+
+    first.close();
+    second.close();
+  });
+});
