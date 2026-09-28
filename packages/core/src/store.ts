@@ -678,6 +678,7 @@ class NodeSqliteTaskStore implements TaskStore {
       createdAt,
       updatedAt: createdAt,
       machineId: this.#machineId,
+      originMachineId: this.#machineId,
       tokenTotals: totals,
       contextTokens: null,
     };
@@ -703,9 +704,10 @@ class NodeSqliteTaskStore implements TaskStore {
             cache_read_input_tokens,
             total_tokens,
             updated_at,
-            machine_id
+            machine_id,
+            origin_machine_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -726,6 +728,7 @@ class NodeSqliteTaskStore implements TaskStore {
         totals.cacheReadInputTokens,
         totals.totalTokens,
         session.createdAt,
+        this.#machineId,
         this.#machineId,
       );
 
@@ -1109,6 +1112,7 @@ class NodeSqliteTaskStore implements TaskStore {
           createdAt: session.createdAt,
           session,
           sessionName: resolveSessionName(session),
+          fromAnotherMachine: session.originMachineId !== this.#machineId,
         }),
       ),
       ...contentDocs.map(
@@ -1383,6 +1387,8 @@ class NodeSqliteTaskStore implements TaskStore {
                 cache_read_input_tokens AS cacheReadInputTokens,
                 total_tokens AS totalTokens, updated_at AS updatedAt,
                 machine_id AS machineId,
+                COALESCE(NULLIF(origin_machine_id, ''), machine_id)
+                  AS originMachineId,
                 git_branch AS gitBranch,
                 git_worktree_label AS gitWorktreeLabel
          FROM sessions ORDER BY id`,
@@ -1528,8 +1534,9 @@ class NodeSqliteTaskStore implements TaskStore {
            (id, transcript_path, tool, model, title, task_id, parent_session_id,
             origin, subagent_type, agent_id, created_at, input_tokens, output_tokens,
             cache_creation_input_tokens, cache_read_input_tokens, total_tokens,
-            updated_at, machine_id, git_branch, git_worktree_label)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            updated_at, machine_id, git_branch, git_worktree_label,
+            origin_machine_id)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            transcript_path=excluded.transcript_path, tool=excluded.tool,
            model=excluded.model, title=excluded.title, task_id=excluded.task_id,
@@ -1541,6 +1548,10 @@ class NodeSqliteTaskStore implements TaskStore {
            cache_read_input_tokens=excluded.cache_read_input_tokens,
            total_tokens=excluded.total_tokens, updated_at=excluded.updated_at,
            machine_id=excluded.machine_id,
+           -- Where a session ran never changes, so an origin already known
+           -- wins; a legacy row without one can't erase it.
+           origin_machine_id=COALESCE(sessions.origin_machine_id,
+                                      excluded.origin_machine_id),
            git_branch=excluded.git_branch,
            git_worktree_label=excluded.git_worktree_label`,
       );
@@ -1570,6 +1581,7 @@ class NodeSqliteTaskStore implements TaskStore {
           "gitWorktreeLabel" in row
             ? (row.gitWorktreeLabel ?? null)
             : (existing?.gitWorktreeLabel ?? null),
+          row.originMachineId || null,
         );
       }
       const setParent = this.#sqlite.prepare(
@@ -2132,6 +2144,7 @@ type SessionRow = {
   created_at: string;
   updated_at: string;
   machine_id: string;
+  origin_machine_id: string | null;
   input_tokens: number;
   output_tokens: number;
   cache_creation_input_tokens: number;
@@ -2195,6 +2208,7 @@ function sessionFromRow(row: SessionRow): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     machineId: row.machine_id,
+    originMachineId: row.origin_machine_id || row.machine_id,
     tokenTotals: {
       inputTokens: row.input_tokens,
       outputTokens: row.output_tokens,

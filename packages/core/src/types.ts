@@ -87,7 +87,10 @@ export type Session = {
   agentId: string | null;
   createdAt: string;
   updatedAt?: string;
+  // The row's last writer — sync metadata, not where the session ran.
   machineId?: string;
+  // The machine the session ran on, and so where its transcript lives.
+  originMachineId?: string;
   tokenTotals: TokenTotals;
   // Live context-window occupancy when the tool exposes it (Cursor/Codex).
   // Refreshed from the source transcript when the session is read.
@@ -166,6 +169,8 @@ export type TaskTimelineItem =
       createdAt: string;
       session: Session;
       sessionName: string | null;
+      /** The session ran on a different machine than this store's. */
+      fromAnotherMachine: boolean;
     }
   | {
       type: "doc";

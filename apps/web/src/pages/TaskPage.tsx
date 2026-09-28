@@ -648,6 +648,14 @@ function SessionRootRow({
                 {originBadge}
               </span>
             ) : null}
+            {item.fromAnotherMachine ? (
+              <span
+                className="inline-flex items-center w-fit min-h-chip-min px-2 rounded-full text-xs font-bold leading-none text-chip-text bg-chip-bg border border-chip-border"
+                title="Ran on another machine, so its transcript isn't on this one"
+              >
+                Other machine
+              </span>
+            ) : null}
             <span
               className="font-mono"
               title={formatTokenBreakdown(item.session.tokenTotals)}

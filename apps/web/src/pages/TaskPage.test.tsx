@@ -5,6 +5,7 @@ import {
   fireEvent,
   render as renderIntoDocument,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -129,6 +130,7 @@ test("TaskTimelineView renders per-type SVG icons and model chips", () => {
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "session",
@@ -154,6 +156,7 @@ test("TaskTimelineView renders per-type SVG icons and model chips", () => {
           createdAt: "2026-05-29T00:02:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",
@@ -244,6 +247,7 @@ test("TaskTimelineView renders the Cursor brand mark for a cursor session", () =
           createdAt: "2026-06-11T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
     ],
     lastActivityAt: "2026-06-11T00:00:00.000Z",
@@ -310,6 +314,7 @@ test("TaskTimelineView labels uncaptured session token totals as unavailable", (
           createdAt: "2026-06-11T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
     ],
     lastActivityAt: "2026-05-29T00:00:00.000Z",
@@ -422,6 +427,7 @@ test("TaskTimelineView shows root resume commands and doc paths as copy chips", 
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",
@@ -1101,6 +1107,7 @@ function sessionTimelineItem({
   origin = "root",
   subagentType = null,
   sessionName = id,
+  fromAnotherMachine = false,
   tokenTotals,
 }: {
   id: string;
@@ -1111,6 +1118,7 @@ function sessionTimelineItem({
   origin?: "root" | "subagent" | "spawned";
   subagentType?: string | null;
   sessionName?: string | null;
+  fromAnotherMachine?: boolean;
   tokenTotals?: Partial<
     Extract<
       TaskTimeline["items"][number],
@@ -1143,8 +1151,37 @@ function sessionTimelineItem({
       createdAt,
     },
     sessionName,
+    fromAnotherMachine,
   };
 }
+
+test("TaskTimelineView marks sessions that ran on another machine", () => {
+  const timeline: TaskTimeline = {
+    ...baseTimeline(),
+    items: [
+      sessionTimelineItem({
+        id: "here",
+        createdAt: "2026-05-29T00:01:00.000Z",
+      }),
+      sessionTimelineItem({
+        id: "elsewhere",
+        createdAt: "2026-05-29T00:02:00.000Z",
+        fromAnotherMachine: true,
+      }),
+    ],
+  };
+
+  render(
+    <MemoryRouter>
+      <TaskTimelineView timeline={timeline} />
+    </MemoryRouter>,
+  );
+
+  const row = (name: string) =>
+    screen.getByText(name).closest<HTMLElement>("[data-testid='timeline-session-row']")!;
+  expect(within(row("elsewhere")).getByText("Other machine")).toBeInTheDocument();
+  expect(within(row("here")).queryByText("Other machine")).toBeNull();
+});
 
 test("TaskTimelineView copies Claude and Codex resume commands from root rows", async () => {
   const timeline: TaskTimeline = {
@@ -1155,12 +1192,14 @@ test("TaskTimelineView copies Claude and Codex resume commands from root rows", 
         createdAt: "2026-05-29T00:01:00.000Z",
         tool: "claude",
         sessionName: "Named Claude session",
+        fromAnotherMachine: false,
       }),
       sessionTimelineItem({
         id: "codex-root",
         createdAt: "2026-05-29T00:02:00.000Z",
         tool: "codex",
         sessionName: null,
+        fromAnotherMachine: false,
       }),
     ],
   };
@@ -1198,6 +1237,7 @@ test("TaskTimelineView fades the timestamp and reveals Resume on hover, mirrorin
         id: "claude-root",
         createdAt: "2026-05-29T00:01:00.000Z",
         sessionName: null,
+        fromAnotherMachine: false,
       }),
     ],
   };
@@ -1355,6 +1395,7 @@ test("TaskTimelineView leads nameless child rows with their origin instead of a 
       ...overrides,
     },
     sessionName: null,
+    fromAnotherMachine: false,
   });
 
   const timeline: TaskTimeline = {
@@ -2066,6 +2107,7 @@ test("TaskTimelineView renders a single continuous timeline spine across items",
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",
@@ -2101,6 +2143,7 @@ test("TaskTimelineView renders a single continuous timeline spine across items",
           createdAt: "2026-05-29T00:03:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
     ],
   };
@@ -2175,6 +2218,7 @@ function filterableTimeline(): TaskTimeline {
           createdAt: "2026-05-29T00:01:00.000Z",
         },
         sessionName: null,
+        fromAnotherMachine: false,
       },
       {
         type: "doc",

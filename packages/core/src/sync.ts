@@ -45,6 +45,9 @@ export type SyncSessionRow = {
   // machine-local and never appear here.
   gitBranch?: string | null;
   gitWorktreeLabel?: string | null;
+  // Optional on the wire: the machine the session ran on, which unlike
+  // `machineId` never moves. Rows from clients predating it omit it.
+  originMachineId?: string | null;
 };
 
 export type SyncPayload = {
