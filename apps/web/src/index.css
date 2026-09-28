@@ -222,6 +222,11 @@
   --check-ease-bob: cubic-bezier(0.34, 1.35, 0.64, 1);
   --check-ease-path: cubic-bezier(0.22, 1, 0.36, 1);
 
+  /* Task row archive exit: fade, then collapse to zero height */
+  --row-collapse-dur: 350ms;
+  --row-collapse-fade-dur: 200ms;
+  --row-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
   /* transitions-dev: skeleton reveal */
   --skel-pulse-dur: 1000ms;
   --skel-pulse-count: 1;
@@ -279,6 +284,34 @@
 }
 .task-row-meta.t-text-swap { display: flex; }
 .task-row-actions.t-text-swap { display: inline-flex; }
+
+/*
+ * Task row archive exit. The row is a one-track grid whose track animates
+ * 1fr -> 0fr, so it collapses from its real content height to zero and the
+ * rows below close the gap in step. (A max-height transition overshot the row
+ * and left its padding behind, so the gap snapped shut when the row unmounted.)
+ * All vertical padding lives inside .t-row-collapse-inner so nothing survives
+ * the collapse. Opacity is only set on the collapsed state so the archived
+ * row's own dimming utility keeps working.
+ */
+.t-row-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--row-collapse-dur) var(--row-collapse-ease),
+    opacity            var(--row-collapse-fade-dur) var(--row-collapse-ease),
+    transform          var(--row-collapse-dur) var(--row-collapse-ease);
+}
+.t-row-collapse > .t-row-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.t-row-collapse.is-collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
 
 /*
  * transitions-dev: menu dropdown (05-menu-dropdown), entry via @starting-style.
@@ -475,6 +508,7 @@
   .t-skel-skeleton, .t-skel-content { transition: none !important; }
   .t-skel-skeleton.is-pulsing > * { animation: none !important; }
   .t-sync-spinner { animation: none !important; }
+  .t-row-collapse { transition: none !important; }
 }
 
 /*

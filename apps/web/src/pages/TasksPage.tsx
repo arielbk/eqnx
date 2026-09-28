@@ -147,6 +147,7 @@ export function TasksPage() {
           readOnly={readOnly}
           linkToDetail={source.capabilities.taskDetails}
           hiddenArchivedCount={archivedHidden}
+          collapseOnArchive={!showArchived}
         />
       </SkeletonReveal>
     </main>
@@ -184,6 +185,7 @@ export function TaskList({
   readOnly = false,
   linkToDetail = true,
   hiddenArchivedCount = 0,
+  collapseOnArchive = true,
 }: {
   tasks: TaskSummary[];
   onArchive?: (task: TaskSummary) => void | Promise<void>;
@@ -193,6 +195,8 @@ export function TaskList({
   readOnly?: boolean;
   linkToDetail?: boolean;
   hiddenArchivedCount?: number;
+  /** False while archived tasks are shown, so archiving keeps the row. */
+  collapseOnArchive?: boolean;
 }) {
   const { pinned, rest } = partitionPinned(tasks);
 
@@ -218,6 +222,7 @@ export function TaskList({
         onPin={readOnly ? undefined : onPin}
         onUnpin={readOnly ? undefined : onUnpin}
         linkToDetail={linkToDetail}
+        collapseOnArchive={collapseOnArchive}
       />
     ));
   }
