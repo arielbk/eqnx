@@ -603,8 +603,11 @@ function SessionRootRow({
   // stacking two pills.
   const originBadge = sessionOriginBadge(item.session);
   const childTitle = item.sessionName ? null : sessionChildTitle(item.session);
+  // A session from another machine has no transcript here to resume.
   const resumeCopyValue =
-    item.session.origin === "root" ? resumeCommand(item.session) : null;
+    item.session.origin === "root" && !item.fromAnotherMachine
+      ? resumeCommand(item.session)
+      : null;
   const title = item.sessionName ?? childTitle;
 
   return (

@@ -1183,6 +1183,35 @@ test("TaskTimelineView marks sessions that ran on another machine", () => {
   expect(within(row("here")).queryByText("Other machine")).toBeNull();
 });
 
+test("TaskTimelineView offers no resume command for a session from another machine", () => {
+  const timeline: TaskTimeline = {
+    ...baseTimeline(),
+    items: [
+      sessionTimelineItem({
+        id: "here",
+        createdAt: "2026-05-29T00:01:00.000Z",
+      }),
+      sessionTimelineItem({
+        id: "elsewhere",
+        createdAt: "2026-05-29T00:02:00.000Z",
+        fromAnotherMachine: true,
+      }),
+    ],
+  };
+
+  render(
+    <MemoryRouter>
+      <TaskTimelineView timeline={timeline} />
+    </MemoryRouter>,
+  );
+
+  // Its transcript isn't on this machine, so the copied command would fail.
+  const row = (name: string) =>
+    screen.getByText(name).closest<HTMLElement>("[data-testid='timeline-session-row']")!;
+  expect(within(row("elsewhere")).queryByTestId("timeline-row-resume")).toBeNull();
+  expect(within(row("here")).getByTestId("timeline-row-resume")).toBeInTheDocument();
+});
+
 test("TaskTimelineView copies Claude and Codex resume commands from root rows", async () => {
   const timeline: TaskTimeline = {
     ...baseTimeline(),
