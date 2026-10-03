@@ -238,6 +238,12 @@ describe("skills scaffold", () => {
     assert.match(source, /orient first/i);
     assert.match(source, /trace-state/);
     assert.match(source, /eqnx state reflect/);
+
+    // It consumes the manifest's archiveSuggestion block as an offer only:
+    // the agent mentions it once and points at the board; nothing archives.
+    assert.match(source, /archiveSuggestion/);
+    assert.match(source, /never archives/i);
+    assert.match(source, /eqnx board/);
   });
 
   it("ships a board skill that fires only on open-the-board intent and opens the board itself", () => {
@@ -290,5 +296,10 @@ describe("skills scaffold", () => {
     assert.equal(source.includes("## Decisions made"), false);
     assert.equal(source.includes("## Open questions"), false);
     assert.equal(/write [`'"]none[`'"]/i.test(source), false);
+
+    // A finished task says so explicitly: the Next step leads with `Done.`,
+    // the declaration EQNX reads to suggest archiving.
+    assert.match(source, /`Done\.`/);
+    assert.match(source, /suggest[\s\S]{0,40}archiv/i);
   });
 });

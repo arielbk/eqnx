@@ -71,7 +71,15 @@ type DocumentMetadata = {
 // Bridge to the store's task_docs rows, so registered doc titles and
 // descriptions travel inside the manifest rather than staying machine-local.
 export type DocMetadataAccessor = {
-  list(taskId: string): { path: string; title?: string; description?: string }[];
+  list(taskId: string): {
+    path: string;
+    title?: string;
+    description?: string;
+    // A promoted doc lists as its repo file; its labels ride with the
+    // pointer left in the docs dir.
+    promoted?: { pointerPath: string };
+  }[];
+  remove?(taskId: string, path: string): void;
   update(
     taskId: string,
     path: string,
@@ -218,8 +226,9 @@ export class FileSystemDocumentStore implements SyncDocumentStore {
       validateManifest(manifestFiles);
 
       const docsDir = resolveTaskDocsDir(this.databasePath, task.slug);
+      const previousFiles = readFiles(docsDir);
       const local = new Map(
-        readFiles(docsDir).map((file) => [
+        previousFiles.map((file) => [
           crypto.address(file.content),
           file.content,
         ]),
@@ -252,6 +261,14 @@ export class FileSystemDocumentStore implements SyncDocumentStore {
         continue;
       }
 
+      // Metadata for removed native files must disappear too, otherwise a
+      // moved document leaves a second, missing row on receiving machines.
+      // Only remove rows for files in the replaced local file set, preserving
+      // external registrations and labels in old-format manifests.
+      const previousPaths = new Set(previousFiles.map((file) => join(docsDir, ...file.path.split("/"))));
+      const incomingPaths = new Set(manifestFiles.map((file) => join(docsDir, ...file.path.split("/"))));
+      const removedMetadata = (this.options.docs?.list(task.id) ?? []).map((doc) => doc.promoted?.pointerPath ?? doc.path)
+        .filter((path) => previousPaths.has(path) && !incomingPaths.has(path));
       rmSync(docsDir, { recursive: true, force: true });
       for (const file of manifestFiles) {
         const destination = join(docsDir, ...file.path.split("/"));
@@ -260,6 +277,7 @@ export class FileSystemDocumentStore implements SyncDocumentStore {
         const stamp = stampFor(file, manifest);
         if (stamp) utimesSync(destination, new Date(stamp), new Date(stamp));
       }
+      for (const path of removedMetadata) this.options.docs?.remove?.(task.id, path);
       // Entries that carry metadata are authoritative for it; entries without
       // any leave local task_docs rows untouched, so an old-format manifest
       // can never strip labels this machine already has.
@@ -307,7 +325,8 @@ export class FileSystemDocumentStore implements SyncDocumentStore {
       if (doc.title === undefined && doc.description === undefined) continue;
       // Legacy rows may hold a bare relative path; resolve it the same way
       // the doc listing does before checking it lives inside the docs dir.
-      const absolute = isAbsolute(doc.path) ? doc.path : resolve(docsDir, doc.path);
+      const path = doc.promoted?.pointerPath ?? doc.path;
+      const absolute = isAbsolute(path) ? path : resolve(docsDir, path);
       const relativePath = relative(docsDir, absolute);
       if (relativePath.startsWith("..") || isAbsolute(relativePath)) continue;
       metadataByPath.set(relativePath.split(sep).join("/"), {

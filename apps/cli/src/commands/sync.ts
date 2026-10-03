@@ -208,6 +208,7 @@ export async function runSyncCommand(
           keyWrapper: createKeyWrapper(masterKey),
           docs: {
             list: (taskId) => store.listDocsForTask(taskId),
+            remove: (taskId, path) => store.removeTaskDoc(taskId, path),
             update: (taskId, path, fields) =>
               void store.updateTaskDoc(taskId, path, fields),
           },

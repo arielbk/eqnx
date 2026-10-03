@@ -23,6 +23,11 @@ import {
   slugify,
 } from "./slug.ts";
 import {
+  moveDocToRepo,
+  moveDocToTask,
+  DOC_POINTER_SUFFIX,
+} from "./doc-pointer.ts";
+import {
   listNativeTaskDocs,
   mergeTaskDocs,
   resolveTaskDocsDir,
@@ -35,7 +40,11 @@ import {
 import { resolveSessionName } from "./session-name.ts";
 import { parseStateMd } from "./state-parser.ts";
 import { computeStateFreshness } from "./state-freshness.ts";
-import { partitionStateDocument } from "./state-document.ts";
+import {
+  partitionStateDocument,
+  readStateDocument,
+} from "./state-document.ts";
+import { declaresDone, suggestsArchive } from "./archive-suggestion.ts";
 import {
   getTranscriptAdapter,
   type ParsedTranscript,
@@ -49,6 +58,7 @@ import type {
   ActiveTask,
   AddTaskDocOptions,
   GitWorkContext,
+  MoveTaskDocOptions,
   Project,
   ProjectMergeResult,
   ProjectResolution,
@@ -400,6 +410,7 @@ class NodeSqliteTaskStore implements TaskStore {
         tokenTotals,
         agentTools,
         hasDocs,
+        ...(this.#archiveSuggested(task) ? { archiveSuggested: true } : {}),
       };
     });
   }
@@ -527,6 +538,64 @@ class NodeSqliteTaskStore implements TaskStore {
       .run(this.#updatedNow(), this.#machineId, task.id);
 
     return { ...task, archivedAt: null };
+  }
+
+  dismissArchiveSuggestion(ref: string): Task {
+    const task = this.getTaskByRef(ref);
+    if (!task) throw new Error(`Task not found: ${ref}`);
+
+    // Deliberately leaves updated_at/machine_id alone: the dismissal is a
+    // machine-local board preference, not synced task state.
+    this.#sqlite
+      .prepare(
+        "UPDATE tasks SET archive_suggestion_dismissed_at = ? WHERE id = ?",
+      )
+      .run(new Date().toISOString(), task.id);
+
+    return task;
+  }
+
+  // Whether EQNX suggests archiving this task — the one place the store
+  // gathers `suggestsArchive`'s inputs, so the board list, the task page and
+  // the re-entry manifest can never disagree. The state file is read first and
+  // the rest only when it declares the task done, so an ordinary task costs
+  // one small file read.
+  #archiveSuggested(task: Task): boolean {
+    if (task.archivedAt !== null) return false;
+    const docsDir = resolveTaskDocsDir(this.#databasePath, task.slug);
+    const document = readStateDocument(docsDir, "");
+    if (!document.exists || !declaresDone(document.raw)) return false;
+
+    const { state, others } = partitionStateDocument(
+      this.listDocsForTask(task.id),
+    );
+    const row = this.#sqlite
+      .prepare(
+        `SELECT t.archive_suggestion_dismissed_at AS dismissed_at,
+                (SELECT MAX(s.created_at) FROM sessions s WHERE s.task_id = t.id)
+                  AS last_session_at
+         FROM tasks t WHERE t.id = ?`,
+      )
+      .get(task.id) as
+      | { dismissed_at: string | null; last_session_at: string | null }
+      | undefined;
+    const lastWorkAt = [
+      row?.last_session_at ?? null,
+      ...others.map((doc) => doc.createdAt),
+    ]
+      .filter((at): at is string => at !== null)
+      .reduce<string | undefined>(
+        (latest, at) => (latest === undefined || at > latest ? at : latest),
+        undefined,
+      );
+
+    return suggestsArchive({
+      archivedAt: task.archivedAt,
+      stateText: document.raw,
+      stateWrittenAt: document.stamp?.writtenAt ?? state?.createdAt,
+      lastWorkAt,
+      dismissedAt: row?.dismissed_at ?? null,
+    });
   }
 
   pinTask(ref: string): Task {
@@ -678,6 +747,7 @@ class NodeSqliteTaskStore implements TaskStore {
       createdAt,
       updatedAt: createdAt,
       machineId: this.#machineId,
+      originMachineId: this.#machineId,
       tokenTotals: totals,
       contextTokens: null,
     };
@@ -703,9 +773,10 @@ class NodeSqliteTaskStore implements TaskStore {
             cache_read_input_tokens,
             total_tokens,
             updated_at,
-            machine_id
+            machine_id,
+            origin_machine_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -726,6 +797,7 @@ class NodeSqliteTaskStore implements TaskStore {
         totals.cacheReadInputTokens,
         totals.totalTokens,
         session.createdAt,
+        this.#machineId,
         this.#machineId,
       );
 
@@ -1109,6 +1181,7 @@ class NodeSqliteTaskStore implements TaskStore {
           createdAt: session.createdAt,
           session,
           sessionName: resolveSessionName(session),
+          fromAnotherMachine: session.originMachineId !== this.#machineId,
         }),
       ),
       ...contentDocs.map(
@@ -1168,6 +1241,7 @@ class NodeSqliteTaskStore implements TaskStore {
       ...(lastWorkedOn ? { lastWorkedOn } : {}),
       ...(stateAuthor ? { stateAuthor } : {}),
       ...(stateStale === undefined ? {} : { stateStale }),
+      ...(this.#archiveSuggested(task) ? { archiveSuggested: true } : {}),
     };
   }
 
@@ -1218,6 +1292,7 @@ class NodeSqliteTaskStore implements TaskStore {
           }
         : {}),
       ...(lastWorkedOn ? { lastWorkedOn } : {}),
+      ...(this.#archiveSuggested(task) ? { archiveSuggested: true } : {}),
     };
   }
 
@@ -1229,7 +1304,7 @@ class NodeSqliteTaskStore implements TaskStore {
     const task = this.getTaskByRef(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
-    const normalizedPath = path.trim();
+    const normalizedPath = this.#canonicalDocPath(task, path.trim());
     if (normalizedPath.length === 0) {
       throw new Error("Task doc path is required");
     }
@@ -1272,7 +1347,7 @@ class NodeSqliteTaskStore implements TaskStore {
     const task = this.getTaskByRef(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
-    const normalizedPath = path.trim();
+    const normalizedPath = this.#canonicalDocPath(task, path.trim());
     if (normalizedPath.length === 0) {
       throw new Error("Task doc path is required");
     }
@@ -1345,11 +1420,103 @@ class NodeSqliteTaskStore implements TaskStore {
 
     return mergeTaskDocs(
       registeredDocs,
-      task?.slug ? listNativeTaskDocs(this.#databasePath, id, task.slug) : [],
+      task?.slug
+        ? listNativeTaskDocs(
+            this.#databasePath,
+            id,
+            task.slug,
+            this.#projectRootsForTask(task),
+          )
+        : [],
       task?.slug
         ? resolveTaskDocsDir(this.#databasePath, task.slug)
         : undefined,
     );
+  }
+
+  moveTaskDoc(
+    taskId: string,
+    path: string,
+    options: MoveTaskDocOptions,
+  ): TaskDoc {
+    const task = this.getTaskByRef(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const docsDir = resolveTaskDocsDir(this.#databasePath, task.slug);
+    if (options.to === "task") {
+      if (options.repoPath !== undefined)
+        throw new Error(
+          "--path is only supported when moving to the repository",
+        );
+      const nativePath = resolve(docsDir, path.trim());
+      const repoPath = task.projectRoot
+        ? resolve(task.projectRoot, path.trim())
+        : undefined;
+      const doc = this.listDocsForTask(task.id).find(
+        (candidate) =>
+          candidate.promoted &&
+          (candidate.path === path.trim() ||
+            candidate.path === repoPath ||
+            candidate.promoted.pointerPath === nativePath ||
+            candidate.promoted.pointerPath ===
+              `${nativePath}${DOC_POINTER_SUFFIX}`),
+      );
+      if (!doc?.promoted)
+        throw new Error(
+          "Document is not a repository file belonging to this task",
+        );
+      if (doc.promoted.otherCheckout)
+        throw new Error("Cannot move a file from another checkout");
+      if (doc.promoted.missing)
+        throw new Error(`Repository file not found: ${doc.path}`);
+      const restoredPath = moveDocToTask({
+        docsDir,
+        pointerPath: doc.promoted.pointerPath,
+        sourcePath: doc.path,
+        projectRoot: resolve(
+          doc.path,
+          ...doc.promoted.repoPath.split("/").map(() => ".."),
+        ),
+      });
+      this.#sqlite
+        .prepare(
+          "UPDATE OR REPLACE task_docs SET path = ? WHERE task_id = ? AND path = ?",
+        )
+        .run(restoredPath, task.id, doc.promoted.pointerPath);
+      const restored = this.listDocsForTask(task.id).find(
+        (candidate) => candidate.path === restoredPath,
+      );
+      if (!restored)
+        throw new Error(`Moved document did not list: ${restoredPath}`);
+      return restored;
+    }
+    if (options.to !== "repo")
+      throw new Error("Destination must be repo or task");
+    if (!task.projectRoot)
+      throw new Error(
+        `Task ${task.slug} has no project root to move docs into`,
+      );
+    const docPath = resolve(docsDir, path.trim());
+    const { pointerPath } = moveDocToRepo({
+      docsDir,
+      docPath,
+      projectRoot: task.projectRoot,
+      ...(options.repoPath === undefined ? {} : { to: options.repoPath }),
+    });
+
+    // The metadata row follows the doc to its pointer, which is what lives in
+    // the docs dir and so what sync carries the title and description with.
+    const row = this.getTaskDoc(task.id, docPath);
+    if (row) {
+      this.#sqlite
+        .prepare("UPDATE OR REPLACE task_docs SET path = ? WHERE task_id = ? AND path = ?")
+        .run(pointerPath, task.id, docPath);
+    }
+
+    const promoted = this.listDocsForTask(task.id).find(
+      (doc) => doc.promoted?.pointerPath === pointerPath,
+    );
+    if (!promoted) throw new Error(`Moved document did not list: ${pointerPath}`);
+    return promoted;
   }
 
   removeTaskDoc(taskId: string, path: string): void {
@@ -1383,6 +1550,8 @@ class NodeSqliteTaskStore implements TaskStore {
                 cache_read_input_tokens AS cacheReadInputTokens,
                 total_tokens AS totalTokens, updated_at AS updatedAt,
                 machine_id AS machineId,
+                COALESCE(NULLIF(origin_machine_id, ''), machine_id)
+                  AS originMachineId,
                 git_branch AS gitBranch,
                 git_worktree_label AS gitWorktreeLabel
          FROM sessions ORDER BY id`,
@@ -1528,8 +1697,9 @@ class NodeSqliteTaskStore implements TaskStore {
            (id, transcript_path, tool, model, title, task_id, parent_session_id,
             origin, subagent_type, agent_id, created_at, input_tokens, output_tokens,
             cache_creation_input_tokens, cache_read_input_tokens, total_tokens,
-            updated_at, machine_id, git_branch, git_worktree_label)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            updated_at, machine_id, git_branch, git_worktree_label,
+            origin_machine_id)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            transcript_path=excluded.transcript_path, tool=excluded.tool,
            model=excluded.model, title=excluded.title, task_id=excluded.task_id,
@@ -1541,6 +1711,10 @@ class NodeSqliteTaskStore implements TaskStore {
            cache_read_input_tokens=excluded.cache_read_input_tokens,
            total_tokens=excluded.total_tokens, updated_at=excluded.updated_at,
            machine_id=excluded.machine_id,
+           -- Where a session ran never changes, so an origin already known
+           -- wins; a legacy row without one can't erase it.
+           origin_machine_id=COALESCE(sessions.origin_machine_id,
+                                      excluded.origin_machine_id),
            git_branch=excluded.git_branch,
            git_worktree_label=excluded.git_worktree_label`,
       );
@@ -1570,6 +1744,7 @@ class NodeSqliteTaskStore implements TaskStore {
           "gitWorktreeLabel" in row
             ? (row.gitWorktreeLabel ?? null)
             : (existing?.gitWorktreeLabel ?? null),
+          row.originMachineId || null,
         );
       }
       const setParent = this.#sqlite.prepare(
@@ -2019,6 +2194,34 @@ class NodeSqliteTaskStore implements TaskStore {
     return lines.join("\n");
   }
 
+  // Where a promoted doc can be on this machine: the root the task was
+  // stamped with (which may be another machine's path after a sync) and then
+  // every root this machine has recorded for the same project.
+  #projectRootsForTask(task: Task): string[] {
+    const known = task.projectId
+      ? (
+          this.#sqlite
+            .prepare(
+              `SELECT root_path FROM project_roots
+               WHERE project_id = ?
+               ORDER BY created_at ASC, root_path ASC`,
+            )
+            .all(task.projectId) as { root_path: string }[]
+        ).map((row) => row.root_path)
+      : [];
+    return [...new Set([task.projectRoot, ...known].filter(Boolean))];
+  }
+
+  // A promoted doc is addressed by the repo path it lists as, but its row
+  // belongs on the pointer so its title and description sync with it.
+  #canonicalDocPath(task: Task, path: string): string {
+    if (path.length === 0) return path;
+    const promoted = this.listDocsForTask(task.id).find(
+      (doc) => doc.promoted && doc.path === path,
+    );
+    return promoted?.promoted?.pointerPath ?? path;
+  }
+
   private getTaskDoc(taskId: string, path: string): TaskDoc | null {
     const row = this.#sqlite
       .prepare(
@@ -2132,6 +2335,7 @@ type SessionRow = {
   created_at: string;
   updated_at: string;
   machine_id: string;
+  origin_machine_id: string | null;
   input_tokens: number;
   output_tokens: number;
   cache_creation_input_tokens: number;
@@ -2195,6 +2399,7 @@ function sessionFromRow(row: SessionRow): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     machineId: row.machine_id,
+    originMachineId: row.origin_machine_id || row.machine_id,
     tokenTotals: {
       inputTokens: row.input_tokens,
       outputTokens: row.output_tokens,
@@ -2319,6 +2524,17 @@ function toManifestDoc(doc: TaskDoc): ReEntryManifestDoc {
     title: resolveDocTitle(doc, readDocContentOrNull(doc.path)),
     ...(doc.description ? { description: doc.description } : {}),
     path: doc.path,
+    ...(doc.promoted
+      ? {
+          promoted: {
+            repoPath: doc.promoted.repoPath,
+            missing: doc.promoted.missing,
+            ...(doc.promoted.otherCheckout
+              ? { otherCheckout: doc.promoted.otherCheckout }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 

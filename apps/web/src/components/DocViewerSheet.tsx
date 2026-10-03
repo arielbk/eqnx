@@ -1,11 +1,13 @@
+import { ArrowRightLeft, FolderGit2, Folder } from "lucide-react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { MouseEvent, RefObject } from "react";
+import { useLayoutEffect, useRef, type MouseEvent, type RefObject } from "react";
 import { truncatePath } from "../format.ts";
 import {
   HttpError,
   type DocContents,
   useDocContents,
   useToggleCheckbox,
+  useMoveDoc,
 } from "../lib/api.ts";
 import { resolveTaskDocLink } from "../lib/doc-link-resolver.ts";
 import { useTraceDataSource } from "../lib/trace-data-source.ts";
@@ -24,28 +26,141 @@ export function DocViewerSheet({
   onOpenChange,
   onNavigateDocRoute,
   triggerRef,
+  promoted,
+  canMoveToRepo = false,
+  onMoved,
 }: {
+  canMoveToRepo?: boolean;
+  onMoved?: (path: string) => void;
   taskRef: string;
   docPath: string;
   knownDocPaths?: readonly string[];
   onOpenChange: (open: boolean) => void;
   onNavigateDocRoute?: (route: string) => void;
   triggerRef: RefObject<HTMLElement | null>;
+  /** Set when the doc was promoted into the project repo. */
+  promoted?: { repoPath: string; missing: boolean; otherCheckout?: string };
 }) {
   const query = useDocContents(taskRef, docPath);
   const toggleCheckbox = useToggleCheckbox();
-  const canEditDoc = useTraceDataSource().capabilities.docEdits;
+  const moveDoc = useMoveDoc();
+  const source = useTraceDataSource();
+  const isStateDoc = docPath.split(/[\\/]/).pop()?.toLowerCase() === "state.md";
+  const canMoveDoc =
+    !isStateDoc &&
+    !promoted?.missing &&
+    !promoted?.otherCheckout &&
+    source.capabilities.docEdits &&
+    (Boolean(promoted) || canMoveToRepo);
+  // A copy borrowed from another checkout may be another branch's version, so
+  // it is read-only here just like a source with nowhere to write.
+  const canEditDoc =
+    source.capabilities.docEdits && !promoted?.otherCheckout;
 
   return (
     <Sheet
       onOpenChange={onOpenChange}
       title={<CopyChip value={docPath} display={truncatePath(docPath)} />}
-      description={`Read-only contents of ${docPath}`}
+      description={`Contents of ${docPath}`}
       returnFocusTo={triggerRef}
     >
+      {promoted ? (
+        <div
+          data-testid="doc-viewer-promoted"
+          className="mb-4 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm"
+        >
+          <div className="flex items-center gap-2 text-text">
+            <FolderGit2
+              size={15}
+              className="shrink-0 text-text-muted"
+              aria-hidden="true"
+            />
+            <span className="font-semibold">Repository file</span>
+          </div>
+          <p className="mt-1 mb-0 break-all font-mono text-crumb text-text-muted">
+            {promoted.repoPath}
+          </p>
+          <p className="mt-1.5 mb-0 text-crumb text-text-muted leading-relaxed">
+            {promoted.otherCheckout
+              ? "Viewing a file from another checkout. Editing is disabled here."
+              : promoted.missing
+                ? "This file is stored in the project repository, but is unavailable on this machine."
+                : "Stored in the project repository. Edits here update that file."}
+          </p>
+          {canMoveDoc ? (
+            <button
+              type="button"
+              disabled={moveDoc.isPending}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-control border border-border px-2.5 py-1.5 text-crumb font-semibold text-text hover:bg-bg focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+              onClick={() =>
+                moveDoc.mutate(
+                  { ref: taskRef, path: docPath, to: "task" },
+                  {
+                    onSuccess: (doc) => onMoved?.(doc.path),
+                  },
+                )
+              }
+            >
+              <ArrowRightLeft size={13} aria-hidden="true" />
+              {moveDoc.isPending ? "Moving…" : "Move to task storage"}
+            </button>
+          ) : null}
+          {canMoveDoc ? (
+            <p className="mt-1.5 mb-0 text-crumb text-text-muted">
+              Moves the current file out of your checkout. Git will show a
+              deletion if it was tracked.
+            </p>
+          ) : null}
+          {promoted.otherCheckout ? (
+            <p className="mt-1 mb-0 break-all font-mono text-crumb text-text-muted">
+              {promoted.otherCheckout}
+            </p>
+          ) : null}
+        </div>
+      ) : canMoveDoc ? (
+        <div className="mb-4 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm">
+          <div className="flex items-center gap-2 text-text">
+            <Folder size={15} className="text-text-muted" aria-hidden="true" />
+            <span className="font-semibold">Task storage</span>
+          </div>
+          <p className="mt-1.5 mb-0 text-crumb text-text-muted">
+            Stored with this task, independently of repository branches.
+          </p>
+          <button
+            type="button"
+            disabled={moveDoc.isPending}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-control border border-border px-2.5 py-1.5 text-crumb font-semibold text-text hover:bg-bg focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+            onClick={() =>
+              moveDoc.mutate(
+                { ref: taskRef, path: docPath, to: "repo" },
+                {
+                  onSuccess: (doc) => onMoved?.(doc.path),
+                },
+              )
+            }
+          >
+            <ArrowRightLeft size={13} aria-hidden="true" />
+            {moveDoc.isPending ? "Moving…" : "Move to repository"}
+          </button>
+          <p className="mt-1.5 mb-0 text-crumb text-text-muted">
+            Moves to the repository’s docs directory and keeps it linked to this
+            task.
+          </p>
+        </div>
+      ) : null}
+      {moveDoc.isError ? (
+        <p role="alert" className="mb-4 text-sm text-text-muted">
+          {moveDoc.error.message}
+        </p>
+      ) : null}
       <DocViewerBody
         query={query}
+        promoted={promoted}
         onClick={(event) => {
+          // First, so a code block nested in a task-list line copies instead of
+          // toggling the line's checkbox.
+          if (copyCodeFromClick(event)) return;
+
           const checkbox = checkboxToggleFromClick(event);
           if (checkbox) {
             const { input, index, checked } = checkbox;
@@ -85,10 +200,25 @@ export function DocViewerSheet({
 function DocViewerBody({
   query,
   onClick,
+  promoted,
 }: {
   query: UseQueryResult<DocContents, Error>;
   onClick?: (event: MouseEvent<HTMLDivElement>) => void;
+  promoted?: { repoPath: string; missing: boolean };
 }) {
+  const proseRef = useRef<HTMLDivElement>(null);
+  const html = query.data?.contentType.startsWith("text/html")
+    ? query.data.body
+    : null;
+
+  // The doc arrives as server-rendered HTML, so React can't own children inside
+  // it. React can replace that HTML on a parent rerender even when the string
+  // is unchanged, so restore the buttons after every render. The helper skips
+  // buttons already present; clicks use the container's delegated handler.
+  useLayoutEffect(() => {
+    if (html !== null && proseRef.current) addCopyButtons(proseRef.current);
+  });
+
   if (query.isPending) {
     return <p className="text-text-muted">Loading…</p>;
   }
@@ -96,17 +226,18 @@ function DocViewerBody({
   if (query.isError) {
     return (
       <p role="alert" className="text-text-muted">
-        {docErrorMessage(query.error)}
+        {docErrorMessage(query.error, promoted)}
       </p>
     );
   }
 
-  if (query.data.contentType.startsWith("text/html")) {
+  if (html !== null) {
     return (
       <div
+        ref={proseRef}
         className="doc-viewer-prose text-base text-text-muted leading-relaxed"
         onClick={onClick}
-        dangerouslySetInnerHTML={{ __html: query.data.body }}
+        dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   }
@@ -160,6 +291,44 @@ function docLinkRouteFromClick(
   });
 }
 
+const COPY_LABEL = "Copy";
+const COPIED_LABEL = "Copied";
+const COPIED_RESET_MS = 1200;
+
+function addCopyButtons(container: HTMLElement): void {
+  for (const pre of container.querySelectorAll("pre")) {
+    if (pre.querySelector(":scope > [data-copy-code]")) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.copyCode = "";
+    button.className = "doc-code-copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.textContent = COPY_LABEL;
+    pre.append(button);
+  }
+}
+
+function copyCodeFromClick(event: MouseEvent<HTMLDivElement>): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const button = target.closest("[data-copy-code]");
+  if (!(button instanceof HTMLButtonElement)) return false;
+
+  // Read the <code> rather than the <pre>, which also holds the button's label.
+  const pre = button.closest("pre");
+  const text = pre?.querySelector("code")?.textContent ?? "";
+  // Clipboard may be unavailable (insecure context, denied permission); still
+  // confirm, matching useClipboardCopy.
+  navigator.clipboard?.writeText(text).catch(() => {});
+
+  button.textContent = COPIED_LABEL;
+  window.clearTimeout(Number(button.dataset.resetTimer));
+  button.dataset.resetTimer = String(
+    window.setTimeout(() => (button.textContent = COPY_LABEL), COPIED_RESET_MS),
+  );
+  return true;
+}
+
 function checkboxToggleFromClick(
   event: MouseEvent<HTMLDivElement>,
 ): { input: HTMLInputElement; index: number; checked: boolean } | null {
@@ -196,8 +365,16 @@ function readCheckbox(
   return { input, index, checked };
 }
 
-function docErrorMessage(error: Error): string {
+function docErrorMessage(
+  error: Error,
+  promoted?: { repoPath: string },
+): string {
   if (error instanceof HttpError) {
+    if (error.status === 404 && promoted) {
+      // The pointer synced but the repo file did not: it arrives with the
+      // checkout (a pull, the right branch), not with EQNX.
+      return `This document was promoted to ${promoted.repoPath} in the project repo, and that file is not on this machine.`;
+    }
     if (error.status === 404) return "This document could not be found.";
     if (error.status === 400) {
       return "This document path is outside the task's docs directory.";

@@ -1,11 +1,17 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, resolve, sep } from "node:path";
+import { basename, extname, relative, resolve, sep } from "node:path";
 import { buildTaskExportZip } from "./export-input.ts";
 import { renderMarkdown, toggleTaskListCheckbox } from "./markdown.ts";
 import { openTraceStore, resolveTaskDocsDir } from "./store.ts";
 import { readSyncStatus } from "./sync-status.ts";
 import { traceConnection, type TraceClientScope } from "./connection.ts";
+import {
+  partitionStateDocument,
+  reconcileStateDocumentManifest,
+} from "./state-document.ts";
+import { resolveDocTitle } from "./display-title.ts";
+import type { TaskDoc } from "./types.ts";
 
 export type TraceApiResponse = {
   status: number;
@@ -52,7 +58,7 @@ export interface TraceApiRequestOptions {
    * since the user may flip the setting while the board is open. Absent means
    * the effective default, on. */
   autoSyncEnabled?: boolean;
-  /** Called after any successful mutating request (archive/unarchive, pin/unpin,
+  /** Called after any successful synced mutation (archive/unarchive, pin/unpin,
    * checkbox toggle) so the host can schedule a background sync that pushes the
    * change promptly instead of waiting for the next unrelated sync. */
   onMutation?: () => void;
@@ -146,6 +152,22 @@ export function handleTraceApiRequest(
       }
     }
 
+    // Declining the board's "looks done — archive?" offer. It never archives,
+    // and it is machine-local (not synced), so no sync is scheduled for it.
+    const dismissMatch =
+      /^\/api\/tasks\/([^/]+)\/dismiss-archive-suggestion\/?$/.exec(path);
+    if (dismissMatch?.[1]) {
+      if (method !== "POST") return methodNotAllowed();
+      const store = openTraceStore(databasePath);
+      try {
+        return json(
+          store.dismissArchiveSuggestion(decodeURIComponent(dismissMatch[1])),
+        );
+      } finally {
+        store.close();
+      }
+    }
+
     const pinMatch = /^\/api\/tasks\/([^/]+)\/(pin|unpin)\/?$/.exec(path);
     if (pinMatch?.[1] && pinMatch[2]) {
       if (method !== "POST") return methodNotAllowed();
@@ -196,6 +218,71 @@ export function handleTraceApiRequest(
       }
     }
 
+    const moveMatch = /^\/api\/tasks\/([^/]+)\/docs\/move\/?$/.exec(path);
+    if (moveMatch?.[1]) {
+      if (method !== "POST") return methodNotAllowed();
+      let input: Record<string, unknown>;
+      try {
+        input = JSON.parse(body ?? "") as Record<string, unknown>;
+      } catch {
+        return badRequest("Invalid JSON body");
+      }
+      if (
+        !input ||
+        typeof input.path !== "string" ||
+        !input.path.trim() ||
+        (input.to !== "repo" && input.to !== "task") ||
+        (input.repoPath !== undefined && typeof input.repoPath !== "string")
+      ) {
+        return badRequest(
+          "path and to (repo or task) are required; repoPath must be a string",
+        );
+      }
+      const store = openTraceStore(databasePath);
+      try {
+        const task = store.getTaskByRef(decodeURIComponent(moveMatch[1]));
+        if (!task) return notFound();
+        let doc: TaskDoc;
+        try {
+          doc = store.moveTaskDoc(task.id, input.path, {
+            to: input.to,
+            ...(typeof input.repoPath === "string"
+              ? { repoPath: input.repoPath }
+              : {}),
+          });
+        } catch (error) {
+          return {
+            status: 409,
+            body: error instanceof Error ? error.message : String(error),
+          };
+        }
+        const docsDir = resolveTaskDocsDir(databasePath, task.slug);
+        reconcileStateDocumentManifest(
+          docsDir,
+          task.title,
+          partitionStateDocument(store.listDocsForTask(task.id)).others.map(
+            (item) => {
+              let content: string | null = null;
+              try {
+                content = readFileSync(item.path, "utf8");
+              } catch {
+                /* Unavailable repository file. */
+              }
+              return {
+                label: resolveDocTitle(item, content),
+                href: relative(docsDir, item.path) || basename(item.path),
+                ...(item.description ? { description: item.description } : {}),
+              };
+            },
+          ),
+        );
+        options?.onMutation?.();
+        return json(doc);
+      } finally {
+        store.close();
+      }
+    }
+
     const checkboxMatch = /^\/api\/tasks\/([^/]+)\/docs\/checkbox\/?$/.exec(
       path,
     );
@@ -205,7 +292,13 @@ export function handleTraceApiRequest(
       try {
         const task = store.getTaskByRef(decodeURIComponent(checkboxMatch[1]));
         if (!task) return notFound();
-        const response = toggleTaskDocCheckbox(databasePath, task.slug, body);
+        const response = toggleTaskDocCheckbox(
+          databasePath,
+          task.slug,
+          promotedDocPaths(store, task.id),
+          otherCheckoutDocPaths(store, task.id),
+          body,
+        );
         if (response.status === 200) options?.onMutation?.();
         return response;
       } finally {
@@ -226,7 +319,12 @@ export function handleTraceApiRequest(
         );
         if (!docPath) return badRequest("path query parameter is required");
 
-        return readTaskDocContents(databasePath, task.slug, docPath);
+        return readTaskDocContents(
+          databasePath,
+          task.slug,
+          promotedDocPaths(store, task.id),
+          docPath,
+        );
       } finally {
         store.close();
       }
@@ -306,9 +404,15 @@ const DOC_TEXT_CONTENT_TYPES: Record<string, string> = {
 function readTaskDocContents(
   databasePath: string,
   taskSlug: string,
+  promotedPaths: ReadonlySet<string>,
   docPath: string,
 ): TraceApiResponse {
-  const resolved = resolveInBoundsDocPath(databasePath, taskSlug, docPath);
+  const resolved = resolveInBoundsDocPath(
+    databasePath,
+    taskSlug,
+    promotedPaths,
+    docPath,
+  );
   if (!resolved) {
     return badRequest("Doc path is outside the task's docs directory");
   }
@@ -351,16 +455,45 @@ function readTaskDocContents(
  * Resolve `docPath` against the task's docs directory, returning the absolute
  * path or `null` if it escapes that directory. The single guard against path
  * traversal (and against out-of-bounds registered doc paths) shared by the
- * read-only viewer and the checkbox writer.
+ * read-only viewer and the checkbox writer. The one exception is a promoted
+ * doc's repo file, which the task's own pointer vouches for: it is allowed by
+ * exact match against the paths the task's pointers resolve to, never by
+ * prefix, so a pointer cannot open the rest of the repo.
  */
 function resolveInBoundsDocPath(
   databasePath: string,
   taskSlug: string,
+  promotedPaths: ReadonlySet<string>,
   docPath: string,
 ): string | null {
   const docsDir = resolveTaskDocsDir(databasePath, taskSlug);
   const resolved = resolve(docsDir, docPath);
+  if (promotedPaths.has(resolved)) return resolved;
   return resolved.startsWith(docsDir + sep) ? resolved : null;
+}
+
+// Promoted docs this machine found only in another checkout of the project.
+// They read fine, but may be another branch's version: never written to.
+function otherCheckoutDocPaths(
+  store: { listDocsForTask(taskId: string): TaskDoc[] },
+  taskId: string,
+): Set<string> {
+  return new Set(
+    store
+      .listDocsForTask(taskId)
+      .flatMap((doc) => (doc.promoted?.otherCheckout ? [doc.path] : [])),
+  );
+}
+
+function promotedDocPaths(
+  store: { listDocsForTask(taskId: string): TaskDoc[] },
+  taskId: string,
+): Set<string> {
+  return new Set(
+    store
+      .listDocsForTask(taskId)
+      .flatMap((doc) => (doc.promoted ? [doc.path] : [])),
+  );
 }
 
 /**
@@ -372,6 +505,8 @@ function resolveInBoundsDocPath(
 function toggleTaskDocCheckbox(
   databasePath: string,
   taskSlug: string,
+  promotedPaths: ReadonlySet<string>,
+  otherCheckoutPaths: ReadonlySet<string>,
   body: string | undefined,
 ): TraceApiResponse {
   let parsed: unknown;
@@ -393,9 +528,20 @@ function toggleTaskDocCheckbox(
     return badRequest("Body requires { path, index, checked }");
   }
 
-  const resolved = resolveInBoundsDocPath(databasePath, taskSlug, docPath);
+  const resolved = resolveInBoundsDocPath(
+    databasePath,
+    taskSlug,
+    promotedPaths,
+    docPath,
+  );
   if (!resolved) {
     return badRequest("Doc path is outside the task's docs directory");
+  }
+  if (otherCheckoutPaths.has(resolved)) {
+    return {
+      status: 409,
+      body: "This doc was read from another checkout of the project; edit it there",
+    };
   }
 
   let content: string;

@@ -310,6 +310,72 @@ test("POST /api/tasks/:ref/unarchive clears archivedAt", () => {
   }
 });
 
+test("POST /api/tasks/:ref/dismiss-archive-suggestion records the dismissal without archiving", () => {
+  let taskSlug = "";
+  const { databasePath, cleanup } = withSeededDatabase((store) => {
+    taskSlug = store.createTask("checkout").slug;
+  });
+  let mutations = 0;
+
+  try {
+    const docsDir = resolveTaskDocsDir(databasePath, taskSlug);
+    mkdirSync(docsDir, { recursive: true });
+    writeFileSync(
+      join(docsDir, "state.md"),
+      "# Shipped\n\n## Next step\n\nDone.\n",
+    );
+    const listed = jsonBody(
+      handleTraceApiRequest(databasePath, "GET", "/api/tasks"),
+    );
+    expect(listed[0].archiveSuggested).toBe(true);
+
+    const response = handleTraceApiRequest(
+      databasePath,
+      "POST",
+      `/api/tasks/${taskSlug}/dismiss-archive-suggestion`,
+      undefined,
+      { onMutation: () => mutations++ },
+    );
+    expect(response!.status).toBe(200);
+    expect(jsonBody(response).archivedAt).toBeNull();
+    // Machine-local: nothing to push, so no sync is scheduled.
+    expect(mutations).toBe(0);
+
+    const after = jsonBody(
+      handleTraceApiRequest(databasePath, "GET", "/api/tasks"),
+    );
+    expect(after[0].archiveSuggested).toBeUndefined();
+    expect(after[0].archivedAt).toBeNull();
+  } finally {
+    cleanup();
+  }
+});
+
+test("dismiss-archive-suggestion rejects non-POST methods and unknown tasks", () => {
+  const { databasePath, cleanup } = withSeededDatabase((store) => {
+    store.createTask("checkout");
+  });
+
+  try {
+    expect(
+      handleTraceApiRequest(
+        databasePath,
+        "GET",
+        "/api/tasks/checkout/dismiss-archive-suggestion",
+      )!.status,
+    ).toBe(405);
+    expect(
+      handleTraceApiRequest(
+        databasePath,
+        "POST",
+        "/api/tasks/does-not-exist/dismiss-archive-suggestion",
+      )!.status,
+    ).toBe(404);
+  } finally {
+    cleanup();
+  }
+});
+
 test("archive routes reject non-POST methods", () => {
   let taskId = "";
   const { databasePath, cleanup } = withSeededDatabase((store) => {

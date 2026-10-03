@@ -93,6 +93,19 @@ on platforms with a live `Stop` hook the prose is normally refreshed by the
 still-warm agent, so this block mostly appears when the prior session ran
 somewhere without one (Codex, Cursor) or docs changed out-of-band.
 
+## Archive suggestion
+
+The manifest may carry an `archiveSuggestion:` block — EQNX's signal that the
+task looks done: `state.md`'s Next step declares it finished and no work has
+started since. It is an **offer, not an instruction**. EQNX never archives on
+its own, and neither do you.
+
+When it is present, finish orienting as above, then mention it **once** in
+your recap — "the state says this is done; want to archive it?" — and point the
+user at the board (`eqnx board`), where the task row and page carry a one-click
+archive and a dismiss. If the user is re-entering to keep working, drop it: new
+work withdraws the suggestion by itself.
+
 ## Drift detection
 
 If, once you are oriented, the work has visibly drifted from the stored

@@ -480,7 +480,7 @@ function isHostedReadPath(path: string): boolean {
 
 /**
  * The mutations the hosted board may perform cross-origin: archiving and
- * pinning a task, sign-out, and the login steps that recover existing work. Each
+ * pinning a task, declining its archive suggestion, sign-out, and the login steps that recover existing work. Each
  * task action is reversible, carries no request body, and touches only the
  * task's own board metadata. Doc-checkbox writes, exports, and explicit sync
  * runs stay local-only.
@@ -488,7 +488,9 @@ function isHostedReadPath(path: string): boolean {
 function isHostedActionPath(path: string): boolean {
   const normalized = normalizePath(path);
   return (
-    /^\/api\/tasks\/[^/]+\/(archive|unarchive|pin|unpin)$/.test(normalized) ||
+    /^\/api\/tasks\/[^/]+\/(archive|unarchive|pin|unpin|dismiss-archive-suggestion)$/.test(
+      normalized,
+    ) ||
     normalized === "/api/local-auth/logout" ||
     isRestoreLoginActionPath(normalized)
   );

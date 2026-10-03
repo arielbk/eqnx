@@ -17,6 +17,17 @@ docs, and architecture reviews so names stay consistent.
   with a resolved title (explicit title → first H1 → filename), an optional
   recorded one-line description, and the path. An agent reads the index to
   decide what is worth opening, then follows the pointer on demand.
+- **Document move** — moving a task document out of the task's docs directory
+  and into the project repo (`eqnx task move-doc --to repo`, default `<repo>/docs/`).
+  `--to task` brings the current repo contents back to task storage, restoring
+  the original task filename and removing the repo file and pointer.
+  It is a move, not a copy: the repo file becomes the one source of truth.
+- **Doc pointer** — what moving to the repository leaves behind: `<name>.eqnx-pointer.json`
+  in the task's docs directory, holding the repo-relative path. The task still
+  lists the doc (document index, board) resolved through the pointer against
+  this machine's roots for the project. The pointer, not the body, is what doc
+  sync carries, so another machine lists the doc as *not on this machine*
+  until its checkout has the file.
 - **Last worked on** — historical Git context belonging to the most recent
   task-associated session that captured it: branch name, optional linked-worktree
   display label, and a machine-local absolute path that is not portable. It does
@@ -29,6 +40,14 @@ docs, and architecture reviews so names stay consistent.
   started when the file was last written. Resolved *backwards* from the state
   file's timestamp so the session reading the snapshot back — or the one that
   just re-entered the task — never gets credited with words it did not write.
+- **Archive suggestion** — EQNX's "this looks done — archive it?" offer
+  (`suggestsArchive`). It rests on an explicit signal, never inactivity: the
+  task's `state.md` Next step leads with a done declaration (`Done.`), no
+  session or doc has arrived since that prose was written, and the user has not
+  dismissed it since. EQNX only ever suggests — the board offers a one-click
+  archive or a dismiss, and the re-entry manifest's `archiveSuggestion:` block
+  lets the agent offer the same. A dismissal is machine-local (not synced) and
+  lasts until the state prose is rewritten.
 - **Token Totals** — the value module owning token arithmetic (`empty`, `add`,
   `fromUsage`); consumed by adapters and the store instead of per-call copies.
 - **Pricing** — the value module owning list-price-equivalent cost

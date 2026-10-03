@@ -329,6 +329,54 @@ test("skill re-enter omits the freshness directive when no session binds", () =>
   });
 });
 
+test("skill re-enter offers archiving a task whose state says it is done, and archives nothing", () => {
+  withTempContext((ctx) => {
+    const store = openTraceStore(ctx.env.TRACE_DB!);
+    const task = store.createTask("Finished work", ctx.cwd);
+    store.close();
+    const docsDir = resolveTaskDocsDir(ctx.env.TRACE_DB!, task.slug);
+    mkdirSync(docsDir, { recursive: true });
+    writeFileSync(
+      join(docsDir, "state.md"),
+      "# Shipped\n\n## Next step\n\nDone.\n",
+    );
+
+    const reentered = skillReEnterOperation([task.slug], {
+      ...ctx,
+      env: withoutSessionEnv(ctx.env),
+    });
+
+    expect(reentered.exitCode).toBe(0);
+    expect(reentered.stdout).toContain("archiveSuggestion:\n  looksDone: true");
+
+    const after = openTraceStore(ctx.env.TRACE_DB!);
+    expect(after.getTask(task.id)?.archivedAt).toBeNull();
+    after.close();
+  });
+});
+
+test("skill re-enter carries no archive suggestion for work in progress", () => {
+  withTempContext((ctx) => {
+    const store = openTraceStore(ctx.env.TRACE_DB!);
+    const task = store.createTask("Ongoing work", ctx.cwd);
+    store.close();
+    const docsDir = resolveTaskDocsDir(ctx.env.TRACE_DB!, task.slug);
+    mkdirSync(docsDir, { recursive: true });
+    writeFileSync(
+      join(docsDir, "state.md"),
+      "# Halfway\n\n## Next step\n\nRun the QA plan.\n",
+    );
+
+    const reentered = skillReEnterOperation([task.slug], {
+      ...ctx,
+      env: withoutSessionEnv(ctx.env),
+    });
+
+    expect(reentered.exitCode).toBe(0);
+    expect(reentered.stdout).not.toContain("archiveSuggestion:");
+  });
+});
+
 test("skill work-on-task binds the live Cursor session resolved from the cwd", () => {
   withTempContext((ctx) => {
     const env = withoutSessionEnv(ctx.env);

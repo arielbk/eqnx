@@ -87,7 +87,10 @@ export type Session = {
   agentId: string | null;
   createdAt: string;
   updatedAt?: string;
+  // The row's last writer — sync metadata, not where the session ran.
   machineId?: string;
+  // The machine the session ran on, and so where its transcript lives.
+  originMachineId?: string;
   tokenTotals: TokenTotals;
   // Live context-window occupancy when the tool exposes it (Cursor/Codex).
   // Refreshed from the source transcript when the session is read.
@@ -108,6 +111,32 @@ export type TaskDoc = {
   // Optional one-line description; absent on docs registered without one. It is
   // the source of truth the state.md manifest footer renders from.
   description?: string;
+  // Present when the doc was promoted into the project repo: `path` is then
+  // the repo file (resolved on this machine), and the pointer left in the
+  // task's docs dir is what keeps it listed and what sync carries.
+  promoted?: PromotedDoc;
+};
+
+export type PromotedDoc = {
+  /** Where the doc lives, relative to the project root, POSIX-separated. */
+  repoPath: string;
+  /** The pointer file in the task's docs dir. */
+  pointerPath: string;
+  /** The repo file is not on this machine (not pulled, other branch, no checkout). */
+  missing: boolean;
+  /**
+   * Set when the task's own checkout lacks the file and it was found in this
+   * other checkout of the project instead (a worktree on another branch, a
+   * second clone). It may be a different version, so it is read-only here.
+   */
+  otherCheckout?: string;
+};
+
+export type MoveTaskDocOptions = {
+  /** The document's destination storage location. */
+  to: "repo" | "task";
+  /** Repository-relative destination for `to: "repo"`; defaults to `docs/<name>`. */
+  repoPath?: string;
 };
 
 // Optional metadata captured alongside a doc registration. Both fields are
@@ -166,6 +195,8 @@ export type TaskTimelineItem =
       createdAt: string;
       session: Session;
       sessionName: string | null;
+      /** The session ran on a different machine than this store's. */
+      fromAnotherMachine: boolean;
     }
   | {
       type: "doc";
@@ -198,6 +229,11 @@ export type TaskTimeline = {
    * task has at least one non-state doc to reflect on.
    */
   stateStale?: boolean;
+  /**
+   * Present (and true) only when the task looks done and EQNX suggests
+   * archiving it — see `suggestsArchive`. Never acted on automatically.
+   */
+  archiveSuggested?: true;
 };
 
 export type TaskSummary = Task & {
@@ -206,6 +242,8 @@ export type TaskSummary = Task & {
   tokenTotals: TokenTotals;
   agentTools: SessionTool[];
   hasDocs: boolean;
+  /** Present only when EQNX suggests archiving; see `suggestsArchive`. */
+  archiveSuggested?: true;
 };
 
 export type GitWorkContext = {
@@ -235,6 +273,7 @@ export type ReEntryManifestDoc = {
   path: string;
   title: string;
   description?: string;
+  promoted?: Pick<PromotedDoc, "repoPath" | "missing" | "otherCheckout">;
 };
 
 // The one session pointer the manifest carries: the latest session associated
@@ -257,6 +296,8 @@ export type ReEntryManifest = {
   docs: ReEntryManifestDoc[];
   lastSession?: ReEntryManifestSession;
   lastWorkedOn?: LastWorkedOn;
+  /** Present only when the task looks done; the agent may offer to archive. */
+  archiveSuggested?: true;
 };
 
 export type RegisterSessionInput = {
@@ -304,6 +345,9 @@ export type TaskStore = {
   updateTaskDescription(ref: string, description: string): Task;
   archiveTask(ref: string): Task;
   unarchiveTask(ref: string): Task;
+  // Record that the user declined the "looks done — archive?" suggestion.
+  // Never archives; machine-local, so it does not touch the sync clock.
+  dismissArchiveSuggestion(ref: string): Task;
   pinTask(ref: string): Task;
   unpinTask(ref: string): Task;
   registerSession(input: RegisterSessionInput): Session;
@@ -339,6 +383,12 @@ export type TaskStore = {
     options: UpdateTaskDocOptions,
   ): TaskDoc;
   listDocsForTask(taskId: string): TaskDoc[];
+  // Move a task doc into the project repo and leave a pointer in its place.
+  moveTaskDoc(
+    taskId: string,
+    path: string,
+    options: MoveTaskDocOptions,
+  ): TaskDoc;
   removeTaskDoc(taskId: string, path: string): void;
   syncSnapshot(): SyncPayload;
   /**

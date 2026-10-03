@@ -113,6 +113,13 @@ next — not enough to replace those docs.>
 must be answered before work can continue. Not a list.>
 ```
 
+**When the task is finished**, say so explicitly: start the Next step with
+`Done.` — then, optionally, any loose ends that do not block calling it done.
+That leading declaration is what EQNX reads to suggest archiving the task on
+the board (it only ever suggests; the user decides). Do not write `Done.` while
+anything required remains — a merge, a release, a review — name that action
+instead.
+
 **Do not write a docs footer.** The list of other docs in this task is a
 machine-owned region rendered automatically by `eqnx task add-doc` (and
 `update-doc`). It is delimited by HTML-comment fence markers:

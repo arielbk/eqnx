@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   useArchiveTask,
+  useDismissArchiveSuggestion,
   usePinTask,
   useTasks,
   useUnarchiveTask,
@@ -49,6 +50,7 @@ export function TasksPage() {
   const unarchiveMutation = useUnarchiveTask();
   const pinMutation = usePinTask();
   const unpinMutation = useUnpinTask();
+  const dismissSuggestionMutation = useDismissArchiveSuggestion();
   const [showArchived, setShowArchived] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedProjectSlug = searchParams.get("project");
@@ -97,6 +99,11 @@ export function TasksPage() {
   async function handleUnpin(task: TaskSummary): Promise<void> {
     await unpinMutation.mutateAsync(task.slug);
   }
+  async function handleDismissArchiveSuggestion(
+    task: TaskSummary,
+  ): Promise<void> {
+    await dismissSuggestionMutation.mutateAsync(task.slug);
+  }
 
   return (
     <main className="max-w-app mx-auto px-5 pb-16">
@@ -144,9 +151,13 @@ export function TasksPage() {
           onUnarchive={readOnly ? undefined : handleUnarchive}
           onPin={readOnly ? undefined : handlePin}
           onUnpin={readOnly ? undefined : handleUnpin}
+          onDismissArchiveSuggestion={
+            readOnly ? undefined : handleDismissArchiveSuggestion
+          }
           readOnly={readOnly}
           linkToDetail={source.capabilities.taskDetails}
           hiddenArchivedCount={archivedHidden}
+          collapseOnArchive={!showArchived}
         />
       </SkeletonReveal>
     </main>
@@ -181,18 +192,23 @@ export function TaskList({
   onUnarchive,
   onPin,
   onUnpin,
+  onDismissArchiveSuggestion,
   readOnly = false,
   linkToDetail = true,
   hiddenArchivedCount = 0,
+  collapseOnArchive = true,
 }: {
   tasks: TaskSummary[];
   onArchive?: (task: TaskSummary) => void | Promise<void>;
   onUnarchive?: (task: TaskSummary) => void | Promise<void>;
   onPin?: (task: TaskSummary) => void | Promise<void>;
   onUnpin?: (task: TaskSummary) => void | Promise<void>;
+  onDismissArchiveSuggestion?: (task: TaskSummary) => void | Promise<void>;
   readOnly?: boolean;
   linkToDetail?: boolean;
   hiddenArchivedCount?: number;
+  /** False while archived tasks are shown, so archiving keeps the row. */
+  collapseOnArchive?: boolean;
 }) {
   const { pinned, rest } = partitionPinned(tasks);
 
@@ -217,7 +233,11 @@ export function TaskList({
         onUnarchive={readOnly ? undefined : onUnarchive}
         onPin={readOnly ? undefined : onPin}
         onUnpin={readOnly ? undefined : onUnpin}
+        onDismissArchiveSuggestion={
+          readOnly ? undefined : onDismissArchiveSuggestion
+        }
         linkToDetail={linkToDetail}
+        collapseOnArchive={collapseOnArchive}
       />
     ));
   }

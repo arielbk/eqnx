@@ -499,6 +499,11 @@ test("eqnx serve applies every enabled hosted task action to the store", () => {
   expect(JSON.parse(act("unarchive").body).archivedAt).toBeNull();
   expect(JSON.parse(act("pin").body).pinnedAt).not.toBeNull();
   expect(JSON.parse(act("unpin").body).pinnedAt).toBeNull();
+  // Declining the board's archive suggestion is the same kind of reversible,
+  // bodiless, task-local action — and it never archives.
+  const dismissed = act("dismiss-archive-suggestion");
+  expect(dismissed.statusCode).toBe(200);
+  expect(JSON.parse(dismissed.body).archivedAt).toBeNull();
 });
 
 test("eqnx serve guards hosted task actions by origin, credential, and method", () => {

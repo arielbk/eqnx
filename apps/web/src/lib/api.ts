@@ -463,6 +463,23 @@ export async function postUnarchive(
   return res.json() as Promise<{ id: string; archivedAt: string | null }>;
 }
 
+/** Decline the board's "looks done — archive?" offer. Never archives. */
+export async function postDismissArchiveSuggestion(
+  ref: string,
+  source: TraceDataSource = defaultTraceDataSource,
+): Promise<{ id: string }> {
+  const res = await source.request(
+    `/api/tasks/${encodeURIComponent(ref)}/dismiss-archive-suggestion`,
+    { method: "POST" },
+  );
+  if (!res.ok)
+    throw new HttpError(
+      res.status,
+      `POST dismiss-archive-suggestion ${ref} failed: ${res.status}`,
+    );
+  return res.json() as Promise<{ id: string }>;
+}
+
 export async function postPin(
   ref: string,
   source: TraceDataSource = defaultTraceDataSource,
@@ -572,6 +589,47 @@ export function useArchiveTask() {
   });
 }
 
+export function useMoveDoc() {
+  const qc = useQueryClient();
+  const source = useTraceDataSource();
+  return useMutation({
+    mutationFn: async ({
+      ref,
+      path,
+      to,
+    }: {
+      ref: string;
+      path: string;
+      to: "repo" | "task";
+    }) => {
+      const response = await source.request(
+        `/api/tasks/${encodeURIComponent(ref)}/docs/move`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path, to }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          (await response.text()) || "Could not move the document",
+        );
+      return response.json() as Promise<{ path: string }>;
+    },
+    onSuccess: async (_doc, { ref }) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: traceQueryKey(source, "tasks") }),
+        qc.invalidateQueries({
+          queryKey: traceQueryKey(source, "task-timeline", ref),
+        }),
+        qc.invalidateQueries({
+          queryKey: traceQueryKey(source, "doc-contents", ref),
+        }),
+      ]);
+    },
+  });
+}
+
 export function useToggleCheckbox() {
   const qc = useQueryClient();
   const source = useTraceDataSource();
@@ -603,6 +661,20 @@ export function useUnarchiveTask() {
   const source = useTraceDataSource();
   return useMutation({
     mutationFn: (ref: string) => postUnarchive(ref, source),
+    onSuccess: (_data, ref) => {
+      void qc.invalidateQueries({ queryKey: traceQueryKey(source, "tasks") });
+      void qc.invalidateQueries({
+        queryKey: traceQueryKey(source, "task-timeline", ref),
+      });
+    },
+  });
+}
+
+export function useDismissArchiveSuggestion() {
+  const qc = useQueryClient();
+  const source = useTraceDataSource();
+  return useMutation({
+    mutationFn: (ref: string) => postDismissArchiveSuggestion(ref, source),
     onSuccess: (_data, ref) => {
       void qc.invalidateQueries({ queryKey: traceQueryKey(source, "tasks") });
       void qc.invalidateQueries({

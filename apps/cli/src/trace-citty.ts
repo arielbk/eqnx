@@ -20,6 +20,7 @@ import {
 } from "./commands/seam.ts";
 import {
   taskAddDocOperation,
+  taskMoveDocOperation,
   taskUpdateDocOperation,
   taskCaptureOperation,
   taskCreateOperation,
@@ -212,6 +213,16 @@ export function buildTraceCittyRoot(
             meta: { description: "Update a registered doc's title or description" },
             run({ rawArgs: args }: { rawArgs: string[] }): CommandResult {
               return taskUpdateDocOperation(args, { env, cwd, stdin });
+            },
+          }),
+
+          "move-doc": defineCommand({
+            meta: {
+              description:
+                "Move a document between task storage and the project repository",
+            },
+            run({ rawArgs: args }: { rawArgs: string[] }): CommandResult {
+              return taskMoveDocOperation(args, { env, cwd, stdin });
             },
           }),
         },

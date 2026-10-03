@@ -42,9 +42,10 @@ export class UnsupportedOperationError extends Error {
 export type TraceDataSourceCapabilities = Readonly<{
   requiresConnection: boolean;
   taskDetails: boolean;
-  /** Archive, unarchive, pin, and unpin — a task's own board metadata. */
+  /** Archive, unarchive, pin, unpin, and dismissing an archive suggestion —
+   * a task's own board metadata. */
   taskMutations: boolean;
-  /** Doc checkbox writes, which change files on the machine's disk. */
+  /** Document edits and moves, which change files on the machine's disk. */
   docEdits: boolean;
   /** Export downloads, which pull whole tasks and transcripts out at once. */
   taskExports: boolean;
@@ -141,9 +142,14 @@ function readAdvertisedCapabilities(
  */
 function requiredCapability(path: string): TraceCapability | null {
   const route = path.split("?", 1)[0] ?? path;
-  if (/^\/api\/tasks\/[^/]+\/docs\/checkbox$/.test(route)) return "docEdits";
+  if (/^\/api\/tasks\/[^/]+\/docs\/(checkbox|move)$/.test(route))
+    return "docEdits";
   if (/^\/api\/tasks\/[^/]+\/export$/.test(route)) return "taskExports";
-  if (/^\/api\/tasks\/[^/]+\/(archive|unarchive|pin|unpin)$/.test(route)) {
+  if (
+    /^\/api\/tasks\/[^/]+\/(archive|unarchive|pin|unpin|dismiss-archive-suggestion)$/.test(
+      route,
+    )
+  ) {
     return "taskMutations";
   }
   if (/^\/api\/tasks\/[^/]+\/(timeline|docs)$/.test(route)) {

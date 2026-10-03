@@ -36,6 +36,7 @@ export type {
   StateAuthor,
   Task,
   TaskDoc,
+  PromotedDoc,
   TaskStore,
   TaskSummary,
   TaskTimeline,

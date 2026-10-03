@@ -6,12 +6,6 @@ export type ProjectCount = {
   count: number;
 };
 
-export type ProjectTaskGroup = {
-  projectId: string;
-  projectSlug: string;
-  tasks: TaskSummary[];
-};
-
 type VisibilityOptions = {
   showArchived?: boolean;
 };
@@ -86,33 +80,4 @@ export function partitionPinned(tasks: TaskSummary[]): {
   pinned.sort(byActivityDesc);
   rest.sort(byActivityDesc);
   return { pinned, rest };
-}
-
-export function groupTasksByProject(tasks: TaskSummary[]): ProjectTaskGroup[] {
-  const groups = new Map<string, ProjectTaskGroup>();
-
-  for (const task of tasks) {
-    const group = groups.get(task.projectId);
-
-    if (group) {
-      group.tasks.push(task);
-      continue;
-    }
-
-    groups.set(task.projectId, {
-      projectId: task.projectId,
-      projectSlug: task.projectSlug,
-      tasks: [task],
-    });
-  }
-
-  const ordered = Array.from(groups.values());
-  for (const group of ordered) {
-    group.tasks.sort(byActivityDesc);
-  }
-  ordered.sort(
-    (a, b) => activityEpoch(b.tasks[0]!) - activityEpoch(a.tasks[0]!),
-  );
-
-  return ordered;
 }

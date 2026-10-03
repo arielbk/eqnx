@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -14,6 +15,10 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import type { TaskSummary, TokenTotals } from "@trace/core";
 import { FilterBar, TaskList, TasksPage } from "./TasksPage.tsx";
+import {
+  ARCHIVE_EXIT_MS,
+  ARCHIVE_SUCCESS_HOLD_MS,
+} from "../components/TaskRow.tsx";
 import {
   LocalTraceSource,
   TraceDataSourceProvider,
@@ -126,7 +131,9 @@ describe("TasksPage", () => {
       { wrapper: makeQueryWrapper() },
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Pin CLI work" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Pin CLI work" }),
+    );
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([url]) =>
@@ -142,7 +149,6 @@ describe("TasksPage", () => {
       screen.queryByRole("button", { name: "Account" }),
     ).not.toBeInTheDocument();
   });
-
 
   test("a hosted board whose runtime grants the account offers signing in", async () => {
     const origin = "http://127.0.0.1:4317";
@@ -217,14 +223,18 @@ describe("TasksPage", () => {
     );
 
     const listsBeforeSuccess = listCalls();
-    fireEvent.click(await screen.findByRole("button", { name: "Pin CLI work" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Pin CLI work" }),
+    );
     await waitFor(() =>
       expect(listCalls()).toBeGreaterThan(listsBeforeSuccess),
     );
 
     pinOk = false;
     const listsBeforeFailure = listCalls();
-    fireEvent.click(await screen.findByRole("button", { name: "Pin CLI work" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Pin CLI work" }),
+    );
     await waitFor(() => expect(pinCalls()).toBe(2));
 
     expect(listCalls()).toBe(listsBeforeFailure);
@@ -288,13 +298,17 @@ describe("TasksPage", () => {
     // consume their own body (a shared Response can only be read once).
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) =>
-        Promise.resolve(
-          url === "/api/tasks"
-            ? new Response(JSON.stringify(tasks), { status: 200 })
-            : new Response(JSON.stringify({ state: "logged-out" }), { status: 200 }),
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            url === "/api/tasks"
+              ? new Response(JSON.stringify(tasks), { status: 200 })
+              : new Response(JSON.stringify({ state: "logged-out" }), {
+                  status: 200,
+                }),
+          ),
         ),
-      ),
     );
 
     const { container } = render(<TasksPage />, {
@@ -316,13 +330,17 @@ describe("TasksPage", () => {
     // Keep the tasks query slow so the skeleton shows; let sync-status resolve.
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) =>
-        url === "/api/tasks"
-          ? tasksPending
-          : Promise.resolve(
-              new Response(JSON.stringify({ state: "logged-out" }), { status: 200 }),
-            ),
-      ),
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          url === "/api/tasks"
+            ? tasksPending
+            : Promise.resolve(
+                new Response(JSON.stringify({ state: "logged-out" }), {
+                  status: 200,
+                }),
+              ),
+        ),
     );
 
     const { container } = render(<TasksPage />, {
@@ -351,13 +369,17 @@ describe("TasksPage", () => {
     ];
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) =>
-        Promise.resolve(
-          url === "/api/tasks"
-            ? new Response(JSON.stringify(tasks), { status: 200 })
-            : new Response(JSON.stringify({ state: "logged-out" }), { status: 200 }),
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            url === "/api/tasks"
+              ? new Response(JSON.stringify(tasks), { status: 200 })
+              : new Response(JSON.stringify({ state: "logged-out" }), {
+                  status: 200,
+                }),
+          ),
         ),
-      ),
     );
     render(<TasksPage />, { wrapper: makeQueryWrapper() });
     await screen.findByText("CLI work");
@@ -414,13 +436,17 @@ describe("TasksPage", () => {
     ];
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) =>
-        Promise.resolve(
-          url === "/api/tasks"
-            ? new Response(JSON.stringify(tasks), { status: 200 })
-            : new Response(JSON.stringify({ state: "logged-out" }), { status: 200 }),
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            url === "/api/tasks"
+              ? new Response(JSON.stringify(tasks), { status: 200 })
+              : new Response(JSON.stringify({ state: "logged-out" }), {
+                  status: 200,
+                }),
+          ),
         ),
-      ),
     );
 
     render(<TasksPage />, {
@@ -479,6 +505,119 @@ describe("TasksPage", () => {
     });
   });
 
+  test("an archived row collapses first and only leaves the list after its exit", async () => {
+    const active = [
+      summary({ id: "task-1", slug: "cli-work", title: "CLI work" }),
+      summary({ id: "task-2", slug: "web-work", title: "Web work" }),
+    ];
+    let archived = false;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/tasks") {
+        const tasks = archived
+          ? [
+              { ...active[0]!, archivedAt: "2026-01-01T00:00:00.000Z" },
+              active[1]!,
+            ]
+          : active;
+        return Promise.resolve(
+          new Response(JSON.stringify(tasks), { status: 200 }),
+        );
+      }
+      if (url === "/api/tasks/cli-work/archive") archived = true;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "task-1",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TasksPage />, { wrapper: makeQueryWrapper() });
+    await screen.findByText("CLI work");
+    vi.useFakeTimers();
+
+    const rowFor = (title: string) =>
+      screen.queryByText(title)?.closest("li.task-row") ?? null;
+    fireEvent.click(screen.getByRole("button", { name: "Archive CLI work" }));
+
+    // Confirmation beat: the row is still fully in the list.
+    await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_SUCCESS_HOLD_MS - 1));
+    expect(rowFor("CLI work")).not.toHaveClass("is-collapsed");
+
+    // Exit: the row collapses in place, but the archive has not been sent,
+    // so no refetch can pull the row out mid-animation.
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(rowFor("CLI work")).toHaveClass("t-row-collapse", "is-collapsed");
+    await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_EXIT_MS - 1));
+    expect(rowFor("CLI work")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/tasks/cli-work/archive",
+      expect.anything(),
+    );
+
+    // Exit finished: commit the archive; the refetch then unmounts the row.
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(fetchMock).toHaveBeenCalledWith("/api/tasks/cli-work/archive", {
+      method: "POST",
+    });
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(rowFor("CLI work")).toBeNull();
+    expect(rowFor("Web work")).not.toHaveClass("is-collapsed");
+  });
+
+  test("with archived tasks shown, archiving keeps the row and turns it into an archived row", async () => {
+    const active = [
+      summary({ id: "task-1", slug: "cli-work", title: "CLI work" }),
+    ];
+    let archived = false;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/tasks") {
+        const tasks = archived
+          ? [{ ...active[0]!, archivedAt: "2026-01-01T00:00:00.000Z" }]
+          : active;
+        return Promise.resolve(
+          new Response(JSON.stringify(tasks), { status: 200 }),
+        );
+      }
+      if (url === "/api/tasks/cli-work/archive") archived = true;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "task-1",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(<TasksPage />, {
+      wrapper: makeQueryWrapper(),
+    });
+    await screen.findByText("CLI work");
+    fireEvent.click(screen.getByRole("switch", { name: "Show archived" }));
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Archive CLI work" }));
+    await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_SUCCESS_HOLD_MS + 1));
+    const row = container.querySelector("li.task-row")!;
+    expect(row).not.toHaveClass("is-collapsed");
+
+    await act(() => vi.advanceTimersByTimeAsync(ARCHIVE_EXIT_MS));
+    vi.useRealTimers();
+    await waitFor(() => expect(row).toHaveClass("task-row-archived"));
+    expect(row).not.toHaveClass("is-collapsed");
+    expect(row).toHaveAttribute("data-archive-phase", "idle");
+    expect(
+      screen.getByRole("button", { name: "Unarchive CLI work" }),
+    ).toBeInTheDocument();
+  });
+
   test("clicking pin POSTs to the pin endpoint and the row moves into the Pinned section", async () => {
     const unpinned = [
       summary({ id: "task-1", slug: "cli-work", title: "CLI work" }),
@@ -502,7 +641,9 @@ describe("TasksPage", () => {
       }
       if (url === "/api/sync/status") {
         return Promise.resolve(
-          new Response(JSON.stringify({ state: "logged-out" }), { status: 200 }),
+          new Response(JSON.stringify({ state: "logged-out" }), {
+            status: 200,
+          }),
         );
       }
       pinCalled = true;
@@ -1443,6 +1584,160 @@ describe("TaskRow hover-swap", () => {
 
     expect(onUnarchive).toHaveBeenCalledWith(
       expect.objectContaining({ id: "task-1" }),
+    );
+  });
+});
+
+describe("TaskRow archive suggestion", () => {
+  const looksDone = () =>
+    summary({
+      id: "task-1",
+      slug: "cli-work",
+      title: "CLI work",
+      archiveSuggested: true,
+    });
+
+  test("a row that looks done offers archiving in place, without archiving", () => {
+    const onArchive = vi.fn();
+    render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[looksDone()]}
+          onArchive={onArchive}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Looks done")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Archive CLI work (looks done)" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Dismiss archive suggestion for CLI work",
+      }),
+    ).toBeVisible();
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  test("taking the suggestion archives through the row's usual settle window", async () => {
+    vi.useFakeTimers();
+    const onArchive = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[looksDone()]}
+          onArchive={onArchive}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Archive CLI work (looks done)" }),
+    );
+    expect(onArchive).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2200);
+
+    expect(onArchive).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "task-1" }),
+    );
+  });
+
+  test("dismissing reports the task and never archives it", () => {
+    const onArchive = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[looksDone()]}
+          onArchive={onArchive}
+          onDismissArchiveSuggestion={onDismiss}
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Dismiss archive suggestion for CLI work",
+      }),
+    );
+
+    expect(onDismiss).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "task-1" }),
+    );
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  test("no suggestion shows without the flag, on archived rows, or read-only", () => {
+    const { rerender } = render(
+      <MemoryRouter>
+        <TaskList
+          tasks={[summary({ id: "task-1", title: "CLI work" })]}
+          onArchive={vi.fn()}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("Looks done")).not.toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter>
+        <TaskList
+          tasks={[
+            summary({
+              id: "task-1",
+              title: "CLI work",
+              archiveSuggested: true,
+              archivedAt: "2026-01-01T00:00:00.000Z",
+            }),
+          ]}
+          onArchive={vi.fn()}
+          onUnarchive={vi.fn()}
+          onDismissArchiveSuggestion={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("Looks done")).not.toBeInTheDocument();
+
+    rerender(
+      <MemoryRouter>
+        <TaskList tasks={[looksDone()]} readOnly />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("Looks done")).not.toBeInTheDocument();
+  });
+
+  test("the tasks page POSTs a dismissal to the API", async () => {
+    const tasks = [looksDone()];
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(url === "/api/tasks" ? tasks : { id: "task-1" }),
+          { status: 200 },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TasksPage />, { wrapper: makeQueryWrapper() });
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Dismiss archive suggestion for CLI work",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks/cli-work/dismiss-archive-suggestion",
+        { method: "POST" },
+      ),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/tasks/cli-work/archive",
+      expect.anything(),
     );
   });
 });

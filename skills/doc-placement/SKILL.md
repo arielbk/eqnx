@@ -84,6 +84,26 @@ eqnx task update-doc <slug> <path> --description "<one-line description>"
 Pass `--title`/`--description` to set a field, `--title ""`/`--description ""`
 to clear it; omitted flags are left untouched.
 
+### Moving a document between task storage and the repository
+
+Choose the storage location for the work at hand. Task storage persists across
+branches; repository files travel with Git and can be edited with the code.
+The document stays associated with the task in either location.
+
+```sh
+eqnx task move-doc <slug> <path> --to repo [--path <repo-path>]
+eqnx task move-doc <slug> <path> --to task
+```
+
+Moving to the repository defaults to `<repo>/docs/<name>`. `--path` selects a
+repository-relative destination; end it with `/` for a directory. A pointer
+keeps the document in the task manifest and on the board.
+
+Moving back uses the current repository contents, restores the original task
+filename, and removes the repository file and pointer. Git will show a deletion
+if the repository file was tracked. Both directions refuse existing destination
+files; a missing file or a file in another checkout cannot be moved back.
+
 ## Notes
 
 - `docs-dir` resolves the directory from the live session→task binding, not
