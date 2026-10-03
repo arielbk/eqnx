@@ -1,5 +1,24 @@
 # Changelog
 
+## @eqnx/cli 0.23.0
+
+- Move task documents between task storage and the repository with
+  `eqnx task move-doc <task> <path> --to repo|task` or the document viewer.
+  Documents keep their task association, labels, and timeline dates. Moving
+  back uses current repository contents and removes the repository file.
+- Show clear Repository file and Task storage cards with move actions;
+  missing documents and files from another checkout remain protected.
+- Preserve code-copy buttons across document-viewer refreshes.
+- Smooth archive row collapse, keep archived rows visible when requested,
+  and respect reduced motion.
+- Suggest archiving only when task state explicitly declares completion,
+  with a dismissible, aligned Looks done badge. Nothing archives automatically.
+- Identify sessions from another machine and hide unavailable Resume actions,
+  preserving the original machine through sync and rebinding.
+- Remove stale document-pointer metadata after synced document moves.
+- Align repository metadata and validate releases on Linux and macOS with
+  Node 22 and 24.
+
 ## @eqnx/cli 0.22.1
 
 - Show installation and setup guidance when the hosted board cannot reach EQNX,
