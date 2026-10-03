@@ -1,6 +1,6 @@
 import { useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { TriangleAlert } from "lucide-react";
+import { FolderGit2, TriangleAlert } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { ParsedStateMd } from "@trace/core";
 import {
@@ -590,10 +590,11 @@ export function TaskTimelineView({
                         ) : null}
                         {item.doc.promoted ? (
                           <span
-                            title={`In the project repo at ${item.doc.promoted.repoPath}`}
-                            className="text-xs font-bold uppercase tracking-wide"
+                            title={`Stored in the project repository at ${item.doc.promoted.repoPath}`}
+                            className="inline-flex items-center gap-1.5 rounded border border-border bg-surface px-1.5 py-px text-crumb text-text-muted"
                           >
-                            In repo
+                            <FolderGit2 size={12} aria-hidden="true" />
+                            Repository file
                           </span>
                         ) : null}
                         {item.doc.promoted?.missing ? (
@@ -624,6 +625,14 @@ export function TaskTimelineView({
             docPath={selectedDocPath}
             knownDocPaths={knownDocPaths}
             promoted={promotedDocs.get(selectedDocPath)}
+            canMoveToRepo={
+              Boolean(timeline.task.projectRoot) &&
+              knownDocPaths.includes(selectedDocPath)
+            }
+            onMoved={(path) => {
+              if (onOpenDoc) onOpenDoc(path);
+              else setLocalSelectedDocPath(path);
+            }}
             triggerRef={docTriggerRef}
             onNavigateDocRoute={onNavigateDocRoute}
             onOpenChange={(open) => {
@@ -1082,7 +1091,11 @@ function LastWorkedOnContext({ lastWorkedOn }: { lastWorkedOn: LastWorkedOn }) {
       >
         <span className="text-accent"><BranchIcon testId="last-work-icon" /></span>
         <span>Last worked on</span>
-        {lastWorkedOn.worktree ? <span className="font-semibold text-text">{lastWorkedOn.worktree}</span> : null}
+        {lastWorkedOn.worktree ? (
+          <span className="font-semibold text-text">
+            {lastWorkedOn.worktree}
+          </span>
+        ) : null}
       </span>
     );
   }

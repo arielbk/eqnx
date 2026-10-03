@@ -8,7 +8,7 @@ import {
   taskCaptureOperation,
   taskCreateOperation,
   taskListOperation,
-  taskPromoteDocOperation,
+  taskMoveDocOperation,
   taskShowOperation,
   taskUpdateDocOperation,
   taskUpdateOperation,
@@ -263,12 +263,15 @@ function seedPromotable(ctx: { env: Env; cwd: string; stdin: string }) {
   return { slug, docsDir, docPath };
 }
 
-test("task promote-doc moves a doc into the repo's docs dir and keeps it listed", () => {
+test("task move-doc moves a doc into the repo's docs dir and keeps it listed", () => {
   withTempContext((ctx) => {
     const { slug, docPath } = seedPromotable(ctx);
     const triggerSync = vi.fn();
 
-    const result = taskPromoteDocOperation([slug, docPath], { ...ctx, triggerSync });
+    const result = taskMoveDocOperation([slug, docPath, "--to", "repo"], {
+      ...ctx,
+      triggerSync,
+    });
 
     const target = join(ctx.cwd, "docs", "checkout.prd.md");
     expect(result).toMatchObject({ exitCode: 0, stdout: `${slug}\t${target}\n` });
@@ -283,12 +286,12 @@ test("task promote-doc moves a doc into the repo's docs dir and keeps it listed"
   });
 });
 
-test("task promote-doc takes the doc by its name in the docs dir and a --to path", () => {
+test("task move-doc takes the doc by its name in the docs dir and a --to path", () => {
   withTempContext((ctx) => {
     const { slug } = seedPromotable(ctx);
 
-    const result = taskPromoteDocOperation(
-      [slug, "checkout.prd.md", "--to", "specs/checkout.md"],
+    const result = taskMoveDocOperation(
+      [slug, "checkout.prd.md", "--to", "repo", "--path", "specs/checkout.md"],
       { ...ctx, triggerSync: vi.fn() },
     );
 
@@ -299,14 +302,17 @@ test("task promote-doc takes the doc by its name in the docs dir and a --to path
   });
 });
 
-test("task promote-doc refuses to overwrite an existing repo file", () => {
+test("task move-doc refuses to overwrite an existing repo file", () => {
   withTempContext((ctx) => {
     const { slug, docPath } = seedPromotable(ctx);
     mkdirSync(join(ctx.cwd, "docs"));
     writeFileSync(join(ctx.cwd, "docs", "checkout.prd.md"), "# Theirs\n");
     const triggerSync = vi.fn();
 
-    const result = taskPromoteDocOperation([slug, docPath], { ...ctx, triggerSync });
+    const result = taskMoveDocOperation([slug, docPath, "--to", "repo"], {
+      ...ctx,
+      triggerSync,
+    });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("already exists");
@@ -315,15 +321,39 @@ test("task promote-doc refuses to overwrite an existing repo file", () => {
   });
 });
 
-test("task promote-doc explains its usage", () => {
+test("task move-doc explains its usage", () => {
   withTempContext((ctx) => {
-    expect(taskPromoteDocOperation([], ctx)).toMatchObject({ exitCode: 2 });
-    expect(taskPromoteDocOperation(["--help"], ctx).stdout).toContain(
-      "eqnx task promote-doc <ref> <path> [--to <repo-path>]",
+    expect(taskMoveDocOperation([], ctx)).toMatchObject({ exitCode: 2 });
+    expect(taskMoveDocOperation(["--help"], ctx).stdout).toContain(
+      "eqnx task move-doc <ref> <path> --to <repo|task>",
     );
     const { slug, docPath } = seedPromotable(ctx);
-    expect(taskPromoteDocOperation([slug, docPath, "--bogus"], ctx).stderr).toContain(
-      "Unknown option: --bogus",
-    );
+    expect(
+      taskMoveDocOperation([slug, docPath, "--bogus"], ctx).stderr,
+    ).toContain("Unknown option: --bogus");
+  });
+});
+
+test("task move-doc restores repository edits using the original task filename", () => {
+  withTempContext((ctx) => {
+    const { slug, docPath } = seedPromotable(ctx);
+    const triggerSync = vi.fn();
+    const context = { ...ctx, triggerSync };
+    expect(
+      taskMoveDocOperation(
+        [slug, docPath, "--to", "repo", "--path", "specs/renamed.md"],
+        context,
+      ).exitCode,
+    ).toBe(0);
+    const repoPath = join(ctx.cwd, "specs", "renamed.md");
+    writeFileSync(repoPath, "# Repository edit\n");
+    expect(
+      taskMoveDocOperation([slug, "checkout.prd.md", "--to", "task"], context)
+        .exitCode,
+    ).toBe(0);
+    expect(readFileSync(docPath, "utf8")).toBe("# Repository edit\n");
+    expect(existsSync(repoPath)).toBe(false);
+    expect(taskShowOperation([slug], ctx).stdout).toContain(docPath);
+    expect(triggerSync).toHaveBeenCalledTimes(2);
   });
 });

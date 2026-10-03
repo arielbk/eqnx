@@ -1,3 +1,4 @@
+import { ArrowRightLeft, FolderGit2, Folder } from "lucide-react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, type MouseEvent, type RefObject } from "react";
 import { truncatePath } from "../format.ts";
@@ -6,6 +7,7 @@ import {
   type DocContents,
   useDocContents,
   useToggleCheckbox,
+  useMoveDoc,
 } from "../lib/api.ts";
 import { resolveTaskDocLink } from "../lib/doc-link-resolver.ts";
 import { useTraceDataSource } from "../lib/trace-data-source.ts";
@@ -25,7 +27,11 @@ export function DocViewerSheet({
   onNavigateDocRoute,
   triggerRef,
   promoted,
+  canMoveToRepo = false,
+  onMoved,
 }: {
+  canMoveToRepo?: boolean;
+  onMoved?: (path: string) => void;
   taskRef: string;
   docPath: string;
   knownDocPaths?: readonly string[];
@@ -37,35 +43,114 @@ export function DocViewerSheet({
 }) {
   const query = useDocContents(taskRef, docPath);
   const toggleCheckbox = useToggleCheckbox();
+  const moveDoc = useMoveDoc();
+  const source = useTraceDataSource();
+  const isStateDoc = docPath.split(/[\\/]/).pop()?.toLowerCase() === "state.md";
+  const canMoveDoc =
+    !isStateDoc &&
+    !promoted?.missing &&
+    !promoted?.otherCheckout &&
+    source.capabilities.docEdits &&
+    (Boolean(promoted) || canMoveToRepo);
   // A copy borrowed from another checkout may be another branch's version, so
   // it is read-only here just like a source with nowhere to write.
   const canEditDoc =
-    useTraceDataSource().capabilities.docEdits && !promoted?.otherCheckout;
+    source.capabilities.docEdits && !promoted?.otherCheckout;
 
   return (
     <Sheet
       onOpenChange={onOpenChange}
       title={<CopyChip value={docPath} display={truncatePath(docPath)} />}
-      description={`Read-only contents of ${docPath}`}
+      description={`Contents of ${docPath}`}
       returnFocusTo={triggerRef}
     >
       {promoted ? (
-        <p
+        <div
           data-testid="doc-viewer-promoted"
-          className="m-0 mb-3 text-xs font-bold uppercase tracking-wide text-text-muted"
+          className="mb-4 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm"
         >
-          Lives in the project repo at{" "}
-          <span className="font-mono normal-case">{promoted.repoPath}</span>
-          {promoted.otherCheckout ? (
-            <>
-              {" "}
-              · Read from another checkout at{" "}
-              <span className="font-mono normal-case">
-                {promoted.otherCheckout}
-              </span>
-              , read-only here
-            </>
+          <div className="flex items-center gap-2 text-text">
+            <FolderGit2
+              size={15}
+              className="shrink-0 text-text-muted"
+              aria-hidden="true"
+            />
+            <span className="font-semibold">Repository file</span>
+          </div>
+          <p className="mt-1 mb-0 break-all font-mono text-crumb text-text-muted">
+            {promoted.repoPath}
+          </p>
+          <p className="mt-1.5 mb-0 text-crumb text-text-muted leading-relaxed">
+            {promoted.otherCheckout
+              ? "Viewing a file from another checkout. Editing is disabled here."
+              : promoted.missing
+                ? "This file is stored in the project repository, but is unavailable on this machine."
+                : "Stored in the project repository. Edits here update that file."}
+          </p>
+          {canMoveDoc ? (
+            <button
+              type="button"
+              disabled={moveDoc.isPending}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-control border border-border px-2.5 py-1.5 text-crumb font-semibold text-text hover:bg-bg focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+              onClick={() =>
+                moveDoc.mutate(
+                  { ref: taskRef, path: docPath, to: "task" },
+                  {
+                    onSuccess: (doc) => onMoved?.(doc.path),
+                  },
+                )
+              }
+            >
+              <ArrowRightLeft size={13} aria-hidden="true" />
+              {moveDoc.isPending ? "Moving…" : "Move to task storage"}
+            </button>
           ) : null}
+          {canMoveDoc ? (
+            <p className="mt-1.5 mb-0 text-crumb text-text-muted">
+              Moves the current file out of your checkout. Git will show a
+              deletion if it was tracked.
+            </p>
+          ) : null}
+          {promoted.otherCheckout ? (
+            <p className="mt-1 mb-0 break-all font-mono text-crumb text-text-muted">
+              {promoted.otherCheckout}
+            </p>
+          ) : null}
+        </div>
+      ) : canMoveDoc ? (
+        <div className="mb-4 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm">
+          <div className="flex items-center gap-2 text-text">
+            <Folder size={15} className="text-text-muted" aria-hidden="true" />
+            <span className="font-semibold">Task storage</span>
+          </div>
+          <p className="mt-1.5 mb-0 text-crumb text-text-muted">
+            Stored with this task, independently of repository branches.
+          </p>
+          <button
+            type="button"
+            disabled={moveDoc.isPending}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-control border border-border px-2.5 py-1.5 text-crumb font-semibold text-text hover:bg-bg focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+            onClick={() =>
+              moveDoc.mutate(
+                { ref: taskRef, path: docPath, to: "repo" },
+                {
+                  onSuccess: (doc) => onMoved?.(doc.path),
+                },
+              )
+            }
+          >
+            <ArrowRightLeft size={13} aria-hidden="true" />
+            {moveDoc.isPending ? "Moving…" : "Move to repository"}
+          </button>
+          <p className="mt-1.5 mb-0 text-crumb text-text-muted">
+            Moves to the repository’s docs directory and keeps it linked to this
+            task.
+          </p>
+        </div>
+      ) : null}
+      {moveDoc.isError ? (
+        <p role="alert" className="mb-4 text-sm text-text-muted">
+          {moveDoc.error.message}
         </p>
       ) : null}
       <DocViewerBody
@@ -127,11 +212,12 @@ function DocViewerBody({
     : null;
 
   // The doc arrives as server-rendered HTML, so React can't own children inside
-  // it. Add the copy buttons after each render of new HTML; clicks reach them
-  // through the container's delegated handler, like the checkboxes.
+  // it. React can replace that HTML on a parent rerender even when the string
+  // is unchanged, so restore the buttons after every render. The helper skips
+  // buttons already present; clicks use the container's delegated handler.
   useLayoutEffect(() => {
     if (html !== null && proseRef.current) addCopyButtons(proseRef.current);
-  }, [html]);
+  });
 
   if (query.isPending) {
     return <p className="text-text-muted">Loading…</p>;

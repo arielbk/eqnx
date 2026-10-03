@@ -80,8 +80,12 @@ test("registered doc titles and descriptions travel with the manifest", async ()
   const clock = () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)).toISOString();
   const docsAccessor = (store: typeof first) => ({
     list: (taskId: string) => store.listDocsForTask(taskId),
-    update: (taskId: string, path: string, fields: { title?: string; description?: string }) =>
-      void store.updateTaskDoc(taskId, path, fields),
+    remove: (taskId: string, path: string) => store.removeTaskDoc(taskId, path),
+    update: (
+      taskId: string,
+      path: string,
+      fields: { title?: string; description?: string },
+    ) => void store.updateTaskDoc(taskId, path, fields),
   });
   const firstDocs = new FileSystemDocumentStore(firstDb, () => first.syncSnapshot().tasks, { keyWrapper, now: clock, docs: docsAccessor(first) });
   const secondDocs = new FileSystemDocumentStore(secondDb, () => second.syncSnapshot().tasks, { keyWrapper, now: clock, docs: docsAccessor(second) });
@@ -329,6 +333,7 @@ test("the doc reader reports pulled docs at their source timestamps", async () =
   const keyWrapper = createKeyWrapper("7c".repeat(32));
   const docsAccessor = (store: typeof first) => ({
     list: (taskId: string) => store.listDocsForTask(taskId),
+    remove: (taskId: string, path: string) => store.removeTaskDoc(taskId, path),
     update: (
       taskId: string,
       path: string,
@@ -432,6 +437,7 @@ test("an unparseable manifest date lands the bundle at the local write time", as
   const keyWrapper = createKeyWrapper("35".repeat(32));
   const docsAccessor = (store: typeof first) => ({
     list: (taskId: string) => store.listDocsForTask(taskId),
+    remove: (taskId: string, path: string) => store.removeTaskDoc(taskId, path),
     update: (
       taskId: string,
       path: string,
@@ -578,8 +584,12 @@ test("a promoted doc's pointer and its labels reach another machine", async () =
   const clock = () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)).toISOString();
   const docsAccessor = (store: typeof first) => ({
     list: (taskId: string) => store.listDocsForTask(taskId),
-    update: (taskId: string, path: string, fields: { title?: string; description?: string }) =>
-      void store.updateTaskDoc(taskId, path, fields),
+    remove: (taskId: string, path: string) => store.removeTaskDoc(taskId, path),
+    update: (
+      taskId: string,
+      path: string,
+      fields: { title?: string; description?: string },
+    ) => void store.updateTaskDoc(taskId, path, fields),
   });
   const firstDocs = new FileSystemDocumentStore(firstDb, () => first.syncSnapshot().tasks, { keyWrapper, now: clock, docs: docsAccessor(first) });
   const secondDocs = new FileSystemDocumentStore(secondDb, () => second.syncSnapshot().tasks, { keyWrapper, now: clock, docs: docsAccessor(second) });
@@ -587,8 +597,10 @@ test("a promoted doc's pointer and its labels reach another machine", async () =
   const firstDir = resolveTaskDocsDir(firstDb, task.slug);
   mkdirSync(firstDir, { recursive: true });
   writeFileSync(join(firstDir, "spec.md"), "# The spec\n");
-  first.addTaskDoc(task.id, join(firstDir, "spec.md"), { description: "What we build" });
-  first.promoteTaskDoc(task.id, join(firstDir, "spec.md"));
+  first.addTaskDoc(task.id, join(firstDir, "spec.md"), {
+    description: "What we build",
+  });
+  first.moveTaskDoc(task.id, join(firstDir, "spec.md"), { to: "repo" });
 
   await synchronize(first, server, firstDocs);
   await synchronize(second, server, secondDocs);
@@ -602,6 +614,24 @@ test("a promoted doc's pointer and its labels reach another machine", async () =
       promoted: expect.objectContaining({ repoPath: "docs/spec.md", missing: false }),
     }),
   ]);
+
+  writeFileSync(join(repo, "docs", "spec.md"), "# Edited in repository\n");
+  first.moveTaskDoc(task.id, "spec.md", { to: "task" });
+  await synchronize(first, server, firstDocs);
+  await synchronize(second, server, secondDocs);
+  expect(
+    readFileSync(
+      join(resolveTaskDocsDir(secondDb, task.slug), "spec.md"),
+      "utf8",
+    ),
+  ).toBe("# Edited in repository\n");
+  expect(second.listDocsForTask(task.id)).toEqual([
+    expect.objectContaining({
+      path: join(resolveTaskDocsDir(secondDb, task.slug), "spec.md"),
+      description: "What we build",
+    }),
+  ]);
+  expect(second.listDocsForTask(task.id)[0]?.promoted).toBeUndefined();
 
   first.close();
   second.close();

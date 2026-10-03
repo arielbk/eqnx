@@ -84,19 +84,25 @@ eqnx task update-doc <slug> <path> --description "<one-line description>"
 Pass `--title`/`--description` to set a field, `--title ""`/`--description ""`
 to clear it; omitted flags are left untouched.
 
-### Promoting a document into the repo
+### Moving a document between task storage and the repository
 
-When a task doc has outgrown the task — a spec or ADR the whole team should
-see — move it into the project repo instead of copying it:
+Choose the storage location for the work at hand. Task storage persists across
+branches; repository files travel with Git and can be edited with the code.
+The document stays associated with the task in either location.
 
 ```sh
-eqnx task promote-doc <slug> <path> [--to <repo-path>]
+eqnx task move-doc <slug> <path> --to repo [--path <repo-path>]
+eqnx task move-doc <slug> <path> --to task
 ```
 
-The file moves to `<repo>/docs/<name>` (or `--to`, relative to the project
-root; end it with `/` for a directory), and the task keeps a pointer so the
-doc stays in its manifest and on the board. It refuses to overwrite an existing
-file. After promotion, edit the repo file; there is no second copy.
+Moving to the repository defaults to `<repo>/docs/<name>`. `--path` selects a
+repository-relative destination; end it with `/` for a directory. A pointer
+keeps the document in the task manifest and on the board.
+
+Moving back uses the current repository contents, restores the original task
+filename, and removes the repository file and pointer. Git will show a deletion
+if the repository file was tracked. Both directions refuse existing destination
+files; a missing file or a file in another checkout cannot be moved back.
 
 ## Notes
 

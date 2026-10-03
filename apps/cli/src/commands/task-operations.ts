@@ -20,8 +20,8 @@ import {
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   parseAddDocOptions,
-  parsePromoteDocOptions,
-  promoteDocUsage,
+  parseMoveDocOptions,
+  moveDocUsage,
   parseTaskCaptureArgs,
   parseTaskCreateArgs,
   parseTaskUpdateArgs,
@@ -360,18 +360,18 @@ export function taskUpdateDocOperation(
   return result;
 }
 
-export function taskPromoteDocOperation(
+export function taskMoveDocOperation(
   rawArgs: string[],
   ctx: CommandContext,
 ): CommandResult {
-  if (isHelpFlag(rawArgs[0])) return success(`${promoteDocUsage()}\n`);
+  if (isHelpFlag(rawArgs[0])) return success(`${moveDocUsage()}\n`);
   const taskId = rawArgs[0];
   const path = rawArgs[1];
 
-  if (!taskId) return failure(promoteDocUsage());
-  if (!path) return failure(promoteDocUsage());
+  if (!taskId) return failure(moveDocUsage());
+  if (!path) return failure(moveDocUsage());
 
-  const optionsAttempt = attempt(() => parsePromoteDocOptions(rawArgs.slice(2)));
+  const optionsAttempt = attempt(() => parseMoveDocOptions(rawArgs.slice(2)));
   if (!optionsAttempt.ok) return optionsAttempt.result;
   const options = optionsAttempt.value;
 
@@ -384,7 +384,7 @@ export function taskPromoteDocOperation(
     const fromCwd = resolve(ctx.cwd, path);
     const docPath = isAbsolute(path) || existsSync(fromCwd) ? fromCwd : path;
     const promotedAttempt = attempt(
-      () => store.promoteTaskDoc(task.id, docPath, options),
+      () => store.moveTaskDoc(task.id, docPath, options),
       1,
     );
     if (!promotedAttempt.ok) return promotedAttempt.result;
@@ -393,7 +393,10 @@ export function taskPromoteDocOperation(
     return {
       exitCode: 0,
       stdout: formatTaskDocSummary(task.slug, doc),
-      stderr: `Promoted to ${doc.promoted?.repoPath ?? doc.path} in the project repo; the task keeps a pointer to it.\n`,
+      stderr:
+        options.to === "repo"
+          ? `Moved to ${doc.promoted?.repoPath ?? doc.path} in the project repository; the task keeps a pointer to it.\n`
+          : `Moved to task storage at ${doc.path}; the repository file was removed. Git will show a deletion if it was tracked.\n`,
     };
   });
   if (result.exitCode === 0) (ctx.triggerSync ?? requestAutomaticSync)(ctx.env);

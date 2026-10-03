@@ -1,11 +1,16 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, resolve, sep } from "node:path";
+import { basename, extname, relative, resolve, sep } from "node:path";
 import { buildTaskExportZip } from "./export-input.ts";
 import { renderMarkdown, toggleTaskListCheckbox } from "./markdown.ts";
 import { openTraceStore, resolveTaskDocsDir } from "./store.ts";
 import { readSyncStatus } from "./sync-status.ts";
 import { traceConnection, type TraceClientScope } from "./connection.ts";
+import {
+  partitionStateDocument,
+  reconcileStateDocumentManifest,
+} from "./state-document.ts";
+import { resolveDocTitle } from "./display-title.ts";
 import type { TaskDoc } from "./types.ts";
 
 export type TraceApiResponse = {
@@ -208,6 +213,71 @@ export function handleTraceApiRequest(
       try {
         const timeline = store.getTaskTimeline(decodeURIComponent(match[1]));
         return timeline ? json(timeline) : notFound();
+      } finally {
+        store.close();
+      }
+    }
+
+    const moveMatch = /^\/api\/tasks\/([^/]+)\/docs\/move\/?$/.exec(path);
+    if (moveMatch?.[1]) {
+      if (method !== "POST") return methodNotAllowed();
+      let input: Record<string, unknown>;
+      try {
+        input = JSON.parse(body ?? "") as Record<string, unknown>;
+      } catch {
+        return badRequest("Invalid JSON body");
+      }
+      if (
+        !input ||
+        typeof input.path !== "string" ||
+        !input.path.trim() ||
+        (input.to !== "repo" && input.to !== "task") ||
+        (input.repoPath !== undefined && typeof input.repoPath !== "string")
+      ) {
+        return badRequest(
+          "path and to (repo or task) are required; repoPath must be a string",
+        );
+      }
+      const store = openTraceStore(databasePath);
+      try {
+        const task = store.getTaskByRef(decodeURIComponent(moveMatch[1]));
+        if (!task) return notFound();
+        let doc: TaskDoc;
+        try {
+          doc = store.moveTaskDoc(task.id, input.path, {
+            to: input.to,
+            ...(typeof input.repoPath === "string"
+              ? { repoPath: input.repoPath }
+              : {}),
+          });
+        } catch (error) {
+          return {
+            status: 409,
+            body: error instanceof Error ? error.message : String(error),
+          };
+        }
+        const docsDir = resolveTaskDocsDir(databasePath, task.slug);
+        reconcileStateDocumentManifest(
+          docsDir,
+          task.title,
+          partitionStateDocument(store.listDocsForTask(task.id)).others.map(
+            (item) => {
+              let content: string | null = null;
+              try {
+                content = readFileSync(item.path, "utf8");
+              } catch {
+                /* Unavailable repository file. */
+              }
+              return {
+                label: resolveDocTitle(item, content),
+                href: relative(docsDir, item.path) || basename(item.path),
+                ...(item.description ? { description: item.description } : {}),
+              };
+            },
+          ),
+        );
+        options?.onMutation?.();
+        return json(doc);
       } finally {
         store.close();
       }

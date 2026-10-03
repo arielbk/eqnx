@@ -3132,8 +3132,8 @@ test("TaskTimelineView marks a promoted doc as living in the repo", () => {
     </MemoryRouter>,
   );
 
-  expect(html).toContain('title="In the project repo at docs/plan.md"');
-  expect(html).toContain(">In repo<");
+  expect(html).toContain('title="Stored in the project repository at docs/plan.md"');
+  expect(html).toContain(">Repository file<");
   expect(html).toContain(">Not on this machine<");
   expect(html).toContain(
     'title="Read from another checkout at /work/trace-v2/.worktrees/other; read-only here"',

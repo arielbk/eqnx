@@ -17,7 +17,7 @@ import {
   isDocPointerPath,
   moveFileAcrossDevices,
   parseDocPointer,
-  promoteDocFile,
+  moveDocToRepo,
   resolveDocPointerTarget,
   serializeDocPointer,
 } from "./doc-pointer.ts";
@@ -107,13 +107,13 @@ test("resolveDocPointerTarget with no root at all keeps the repo-relative path",
   });
 });
 
-test("promoteDocFile moves the doc into the repo's docs dir and leaves a pointer", () => {
+test("moveDocToRepo moves the doc into the repo's docs dir and leaves a pointer", () => {
   const source = join(docsDir, "checkout.prd.md");
   writeFileSync(source, "# Checkout PRD\n");
   const past = new Date("2026-01-02T03:04:05.000Z");
   utimesSync(source, past, past);
 
-  const result = promoteDocFile({ docsDir, docPath: source, projectRoot });
+  const result = moveDocToRepo({ docsDir, docPath: source, projectRoot });
 
   expect(result).toEqual({
     repoPath: "docs/checkout.prd.md",
@@ -130,11 +130,11 @@ test("promoteDocFile moves the doc into the repo's docs dir and leaves a pointer
   expect(statSync(result.pointerPath).mtime.toISOString()).toBe(past.toISOString());
 });
 
-test("promoteDocFile honours --to relative to the project root", () => {
+test("moveDocToRepo honours --to relative to the project root", () => {
   const source = join(docsDir, "spec.md");
   writeFileSync(source, "# Spec\n");
 
-  const result = promoteDocFile({
+  const result = moveDocToRepo({
     docsDir,
     docPath: source,
     projectRoot,
@@ -145,22 +145,22 @@ test("promoteDocFile honours --to relative to the project root", () => {
   expect(readFileSync(join(projectRoot, "design/checkout/spec.md"), "utf8")).toBe("# Spec\n");
 });
 
-test("promoteDocFile treats a --to ending in a slash as a directory", () => {
+test("moveDocToRepo treats a --to ending in a slash as a directory", () => {
   const source = join(docsDir, "spec.md");
   writeFileSync(source, "# Spec\n");
 
-  const result = promoteDocFile({ docsDir, docPath: source, projectRoot, to: "adr/" });
+  const result = moveDocToRepo({ docsDir, docPath: source, projectRoot, to: "adr/" });
 
   expect(result.repoPath).toBe("adr/spec.md");
 });
 
-test("promoteDocFile refuses to overwrite an existing target", () => {
+test("moveDocToRepo refuses to overwrite an existing target", () => {
   const source = join(docsDir, "spec.md");
   writeFileSync(source, "# Spec\n");
   mkdirSync(join(projectRoot, "docs"));
   writeFileSync(join(projectRoot, "docs", "spec.md"), "# Someone else's\n");
 
-  expect(() => promoteDocFile({ docsDir, docPath: source, projectRoot })).toThrow(
+  expect(() => moveDocToRepo({ docsDir, docPath: source, projectRoot })).toThrow(
     /already exists/,
   );
   expect(readFileSync(source, "utf8")).toBe("# Spec\n");
@@ -168,48 +168,48 @@ test("promoteDocFile refuses to overwrite an existing target", () => {
   expect(existsSync(`${source}${DOC_POINTER_SUFFIX}`)).toBe(false);
 });
 
-test("promoteDocFile refuses a target outside the project root", () => {
+test("moveDocToRepo refuses a target outside the project root", () => {
   const source = join(docsDir, "spec.md");
   writeFileSync(source, "# Spec\n");
 
   expect(() =>
-    promoteDocFile({ docsDir, docPath: source, projectRoot, to: "../escape.md" }),
+    moveDocToRepo({ docsDir, docPath: source, projectRoot, to: "../escape.md" }),
   ).toThrow(/inside the project/);
   expect(existsSync(source)).toBe(true);
 });
 
-test("promoteDocFile refuses docs that are not in the task's docs dir", () => {
+test("moveDocToRepo refuses docs that are not in the task's docs dir", () => {
   const elsewhere = join(dir, "elsewhere.md");
   writeFileSync(elsewhere, "# Elsewhere\n");
 
-  expect(() => promoteDocFile({ docsDir, docPath: elsewhere, projectRoot })).toThrow(
+  expect(() => moveDocToRepo({ docsDir, docPath: elsewhere, projectRoot })).toThrow(
     /task's docs directory/,
   );
 });
 
-test("promoteDocFile refuses the State Document, a missing doc, and a pointer", () => {
+test("moveDocToRepo refuses the State Document, a missing doc, and a pointer", () => {
   writeFileSync(join(docsDir, "state.md"), "# State\n");
   expect(() =>
-    promoteDocFile({ docsDir, docPath: join(docsDir, "state.md"), projectRoot }),
+    moveDocToRepo({ docsDir, docPath: join(docsDir, "state.md"), projectRoot }),
   ).toThrow(/state\.md/);
 
   expect(() =>
-    promoteDocFile({ docsDir, docPath: join(docsDir, "nope.md"), projectRoot }),
+    moveDocToRepo({ docsDir, docPath: join(docsDir, "nope.md"), projectRoot }),
   ).toThrow(/not found/i);
 
   const pointer = join(docsDir, `spec.md${DOC_POINTER_SUFFIX}`);
   writeFileSync(pointer, serializeDocPointer({ repoPath: "docs/spec.md" }));
-  expect(() => promoteDocFile({ docsDir, docPath: pointer, projectRoot })).toThrow(
-    /already promoted/,
+  expect(() => moveDocToRepo({ docsDir, docPath: pointer, projectRoot })).toThrow(
+    /already in the repository/,
   );
 });
 
-test("promoteDocFile refuses a target that would read as a State Document", () => {
+test("moveDocToRepo refuses a target that would read as a State Document", () => {
   const source = join(docsDir, "notes.md");
   writeFileSync(source, "# Notes\n");
 
   expect(() =>
-    promoteDocFile({ docsDir, docPath: source, projectRoot, to: "docs/state.md" }),
+    moveDocToRepo({ docsDir, docPath: source, projectRoot, to: "docs/state.md" }),
   ).toThrow(/state\.md/);
 });
 
@@ -242,7 +242,7 @@ test("moveFileAcrossDevices rethrows errors other than EXDEV", () => {
   expect(existsSync(source)).toBe(true);
 });
 
-test("promoteDocFile refuses a target that resolves back into the task's docs dir", () => {
+test("moveDocToRepo refuses a target that resolves back into the task's docs dir", () => {
   const source = join(docsDir, "spec.md");
   writeFileSync(source, "# Spec\n");
   // `task capture --link` symlinks <repo>/docs/<slug> at the task docs dir.
@@ -250,17 +250,28 @@ test("promoteDocFile refuses a target that resolves back into the task's docs di
   symlinkSync(docsDir, join(projectRoot, "docs", "checkout"));
 
   expect(() =>
-    promoteDocFile({ docsDir, docPath: source, projectRoot, to: "docs/checkout/spec-copy.md" }),
+    moveDocToRepo({ docsDir, docPath: source, projectRoot, to: "docs/checkout/spec-copy.md" }),
   ).toThrow(/task's docs directory/);
   expect(existsSync(source)).toBe(true);
 });
 
-test("promoting the same doc twice says it is already promoted", () => {
+test("promoting the same doc twice says it is already in the repository", () => {
   const source = join(docsDir, "spec.md");
   writeFileSync(source, "# Spec\n");
-  promoteDocFile({ docsDir, docPath: source, projectRoot });
+  moveDocToRepo({ docsDir, docPath: source, projectRoot });
 
-  expect(() => promoteDocFile({ docsDir, docPath: source, projectRoot })).toThrow(
-    /already promoted to docs\/spec\.md/,
+  expect(() => moveDocToRepo({ docsDir, docPath: source, projectRoot })).toThrow(
+    /already in the repository to docs\/spec\.md/,
   );
+});
+
+test("repository destinations cannot escape through a symlink", () => {
+  const source = join(docsDir, "spec.md");
+  const outside = join(dir, "outside");
+  mkdirSync(outside);
+  symlinkSync(outside, join(projectRoot, "docs"));
+  writeFileSync(source, "# Spec\n");
+  expect(() => moveDocToRepo({ docsDir, docPath: source, projectRoot })).toThrow(/outside the project root/);
+  expect(readFileSync(source, "utf8")).toBe("# Spec\n");
+  expect(existsSync(join(outside, "spec.md"))).toBe(false);
 });

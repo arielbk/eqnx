@@ -1,6 +1,7 @@
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -104,7 +105,7 @@ export function resolveDocPointerTarget(
   return { path: home ? at(home) : repoPath, missing: true };
 }
 
-export type PromoteDocFileInput = {
+export type MoveDocToRepoInput = {
   docsDir: string;
   docPath: string;
   projectRoot: string;
@@ -116,7 +117,7 @@ export type PromoteDocFileInput = {
   to?: string;
 };
 
-export type PromoteDocFileResult = {
+export type MoveDocToRepoResult = {
   repoPath: string;
   targetPath: string;
   pointerPath: string;
@@ -129,7 +130,7 @@ export type PromoteDocFileResult = {
  * into the docs directory through a symlink), and an existing target is never
  * overwritten.
  */
-export function promoteDocFile(input: PromoteDocFileInput): PromoteDocFileResult {
+export function moveDocToRepo(input: MoveDocToRepoInput): MoveDocToRepoResult {
   const docsDir = resolve(input.docsDir);
   const docPath = resolve(docsDir, input.docPath);
   const projectRoot = resolve(input.projectRoot);
@@ -138,34 +139,51 @@ export function promoteDocFile(input: PromoteDocFileInput): PromoteDocFileResult
     throw new Error(`Doc is not in the task's docs directory: ${docPath}`);
   }
   if (isDocPointerPath(docPath)) {
-    throw new Error(`Doc is already promoted: ${docPath}`);
+    throw new Error(`Doc is already in the repository: ${docPath}`);
   }
   if (isStateDocument(docPath)) {
-    throw new Error("state.md is the task's State Document and cannot be promoted");
+    throw new Error("state.md is the task's State Document and cannot be moved");
   }
   if (!isFile(docPath)) {
     const earlier = readPointer(`${docPath}${DOC_POINTER_SUFFIX}`);
     throw new Error(
       earlier
-        ? `Doc is already promoted to ${earlier.repoPath}`
+        ? `Doc is already in the repository to ${earlier.repoPath}`
         : `Doc not found: ${docPath}`,
     );
   }
 
   const targetPath = resolveTarget(projectRoot, input.to, basename(docPath));
   if (!isInside(projectRoot, targetPath)) {
-    throw new Error(`Promotion target must be inside the project root: ${targetPath}`);
+    throw new Error(
+      `Repository destination must be inside the project root: ${targetPath}`,
+    );
+  }
+  if (!isInside(realpathOrSelf(docsDir), realpathOrSelf(docPath))) {
+    throw new Error(
+      `Source resolves outside the task docs directory: ${docPath}`,
+    );
   }
   if (isStateDocument(targetPath)) {
-    throw new Error("A promoted doc cannot be named state.md");
+    throw new Error("A repository document cannot be named state.md");
   }
   if (isInside(realpathOrSelf(docsDir), realpathOfNearestAncestor(targetPath))) {
     throw new Error(
-      `Promotion target resolves into the task's docs directory: ${targetPath}`,
+      `Repository destination resolves into the task's docs directory: ${targetPath}`,
+    );
+  }
+  if (
+    !isInside(
+      realpathOrSelf(projectRoot),
+      realpathOfNearestAncestor(targetPath),
+    )
+  ) {
+    throw new Error(
+      `Move target resolves outside the project root: ${targetPath}`,
     );
   }
   if (existsSync(targetPath)) {
-    throw new Error(`Promotion target already exists: ${targetPath}`);
+    throw new Error(`Repository destination already exists: ${targetPath}`);
   }
 
   const pointerPath = `${docPath}${DOC_POINTER_SUFFIX}`;
@@ -194,6 +212,48 @@ export function promoteDocFile(input: PromoteDocFileInput): PromoteDocFileResult
   return { repoPath, targetPath, pointerPath };
 }
 
+/** Restore the current repository file to the original task document path. */
+export function moveDocToTask(input: {
+  docsDir: string;
+  pointerPath: string;
+  sourcePath: string;
+  projectRoot: string;
+}): string {
+  const docsDir = realpathOrSelf(resolve(input.docsDir));
+  const pointerPath = resolve(input.pointerPath);
+  const targetPath = pointerPath.slice(0, -DOC_POINTER_SUFFIX.length);
+  if (
+    !isDocPointerPath(pointerPath) ||
+    !isInside(docsDir, realpathOfNearestAncestor(pointerPath)) ||
+    !readPointer(pointerPath)
+  ) {
+    throw new Error("Document is not a repository file belonging to this task");
+  }
+  if (existsSync(targetPath))
+    throw new Error(`Task storage target already exists: ${targetPath}`);
+  if (!isFile(input.sourcePath))
+    throw new Error(`Repository file not found: ${input.sourcePath}`);
+  if (
+    !isInside(
+      realpathOrSelf(input.projectRoot),
+      realpathOrSelf(input.sourcePath),
+    )
+  ) {
+    throw new Error("Repository file resolves outside the project root");
+  }
+  const { mtime } = statSync(pointerPath);
+  moveFileAcrossDevices(input.sourcePath, targetPath);
+  try {
+    // Keep the original timeline date even if the repository file was edited.
+    utimesSync(targetPath, mtime, mtime);
+    unlinkSync(pointerPath);
+  } catch (error) {
+    moveFileAcrossDevices(targetPath, input.sourcePath);
+    throw error;
+  }
+  return targetPath;
+}
+
 /**
  * `rename`, falling back to copy + unlink when source and target sit on
  * different filesystems (the task store and a checkout often do). The target
@@ -204,6 +264,15 @@ export function moveFileAcrossDevices(
   target: string,
   fs: { rename?: (from: string, to: string) => void } = {},
 ): void {
+  if (lstatSync(source).isSymbolicLink()) {
+    throw new Error(`Cannot move a symbolic link: ${source}`);
+  }
+  try {
+    lstatSync(target);
+    throw new Error(`Move target already exists: ${target}`);
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
+  }
   const rename = fs.rename ?? renameSync;
   try {
     rename(source, target);

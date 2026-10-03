@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   utimesSync,
   writeFileSync,
@@ -42,7 +43,7 @@ function seedTask(docs: Record<string, string> = { "checkout.prd.md": "# Checkou
   return { store, task, docsDir };
 }
 
-test("promoteTaskDoc moves the doc into the repo and the task lists it from there", () => {
+test("moveTaskDoc moves the doc into the repo and the task lists it from there", () => {
   const { store, task, docsDir } = seedTask();
   const source = join(docsDir, "checkout.prd.md");
   const registered = store.addTaskDoc(task.id, source, {
@@ -51,7 +52,7 @@ test("promoteTaskDoc moves the doc into the repo and the task lists it from ther
   });
 
   try {
-    const promoted = store.promoteTaskDoc(task.slug, source);
+    const promoted = store.moveTaskDoc(task.slug, source, { to: "repo" });
     const target = join(projectRoot, "docs", "checkout.prd.md");
     const pointerPath = `${source}${DOC_POINTER_SUFFIX}`;
 
@@ -79,7 +80,10 @@ test("a promoted doc that was never registered keeps its original date", () => {
   utimesSync(source, past, past);
 
   try {
-    const promoted = store.promoteTaskDoc(task.id, source, { to: "specs/" });
+    const promoted = store.moveTaskDoc(task.id, source, {
+      to: "repo",
+      repoPath: "specs/",
+    });
     expect(promoted.path).toBe(join(projectRoot, "specs", "checkout.prd.md"));
     expect(promoted.createdAt).toBe(past.toISOString());
     expect(promoted.title).toBeUndefined();
@@ -88,27 +92,28 @@ test("a promoted doc that was never registered keeps its original date", () => {
   }
 });
 
-test("promoteTaskDoc accepts a doc path relative to the task's docs dir", () => {
+test("moveTaskDoc accepts a doc path relative to the task's docs dir", () => {
   const { store, task } = seedTask();
   try {
-    expect(store.promoteTaskDoc(task.id, "checkout.prd.md").promoted?.repoPath).toBe(
-      "docs/checkout.prd.md",
-    );
+    expect(
+      store.moveTaskDoc(task.id, "checkout.prd.md", { to: "repo" }).promoted
+        ?.repoPath,
+    ).toBe("docs/checkout.prd.md");
   } finally {
     store.close();
   }
 });
 
-test("promoteTaskDoc refuses a task without a project root", () => {
+test("moveTaskDoc refuses a task without a project root", () => {
   const store = openTraceStore(databasePath);
   const task = store.createTask("loose");
   const docsDir = resolveTaskDocsDir(databasePath, task.slug);
   mkdirSync(docsDir, { recursive: true });
   writeFileSync(join(docsDir, "notes.md"), "# Notes\n");
   try {
-    expect(() => store.promoteTaskDoc(task.id, join(docsDir, "notes.md"))).toThrow(
-      /no project root/,
-    );
+    expect(() =>
+      store.moveTaskDoc(task.id, join(docsDir, "notes.md"), { to: "repo" }),
+    ).toThrow(/no project root/);
   } finally {
     store.close();
   }
@@ -117,7 +122,11 @@ test("promoteTaskDoc refuses a task without a project root", () => {
 test("a promoted doc whose repo file is missing still lists, flagged missing", () => {
   const { store, task, docsDir } = seedTask();
   try {
-    const promoted = store.promoteTaskDoc(task.id, join(docsDir, "checkout.prd.md"));
+    const promoted = store.moveTaskDoc(
+      task.id,
+      join(docsDir, "checkout.prd.md"),
+      { to: "repo" },
+    );
     unlinkSync(promoted.path);
 
     const [listed] = store.listDocsForTask(task.id);
@@ -162,7 +171,11 @@ test("a pointer that arrived by sync resolves against this machine's project roo
 test("title and description edits after promotion land on the pointer", () => {
   const { store, task, docsDir } = seedTask();
   try {
-    const promoted = store.promoteTaskDoc(task.id, join(docsDir, "checkout.prd.md"));
+    const promoted = store.moveTaskDoc(
+      task.id,
+      join(docsDir, "checkout.prd.md"),
+      { to: "repo" },
+    );
     // Callers address the doc by what the listing shows: the repo path.
     store.updateTaskDoc(task.id, promoted.path, { description: "Now in the repo" });
 
@@ -177,7 +190,11 @@ test("title and description edits after promotion land on the pointer", () => {
 test("the re-entry manifest indexes a promoted doc by its repo file", () => {
   const { store, task, docsDir } = seedTask();
   try {
-    const promoted = store.promoteTaskDoc(task.id, join(docsDir, "checkout.prd.md"));
+    const promoted = store.moveTaskDoc(
+      task.id,
+      join(docsDir, "checkout.prd.md"),
+      { to: "repo" },
+    );
     expect(store.getReEntryManifest(task.id)?.docs).toEqual([
       {
         title: "Checkout PRD",
@@ -192,7 +209,11 @@ test("the re-entry manifest indexes a promoted doc by its repo file", () => {
 
 test("the board API serves a promoted doc from the repo, and nothing else outside the docs dir", () => {
   const { store, task, docsDir } = seedTask();
-  const promoted = store.promoteTaskDoc(task.id, join(docsDir, "checkout.prd.md"));
+  const promoted = store.moveTaskDoc(
+    task.id,
+    join(docsDir, "checkout.prd.md"),
+    { to: "repo" },
+  );
   const outsider = join(projectRoot, "secret.md");
   writeFileSync(outsider, "# Secret\n");
   store.close();
@@ -267,6 +288,101 @@ test("a promoted doc found only in another checkout lists from there, and refuse
     `/api/tasks/${task.slug}/docs/checkbox`,
     JSON.stringify({ path: otherFile, index: 0, checked: true }),
   )!;
+  const move = handleTraceApiRequest(
+    databasePath,
+    "POST",
+    `/api/tasks/${task.slug}/docs/move`,
+    JSON.stringify({ path: otherFile, to: "task" }),
+  )!;
+  expect(move.status).toBe(409);
+  expect(move.body).toContain("another checkout");
   expect(write.status).toBe(409);
   expect(readFileSync(otherFile, "utf8")).toContain("- [ ] ship it");
+});
+
+test("moving back restores current repository contents and document metadata", () => {
+  const { store, task, docsDir } = seedTask();
+  const source = join(docsDir, "checkout.prd.md");
+  const registered = store.addTaskDoc(task.id, source, {
+    title: "Checkout PRD",
+  });
+  try {
+    const repoDoc = store.moveTaskDoc(task.id, source, { to: "repo" });
+    writeFileSync(repoDoc.path, "# Edited in the repository\n");
+    const restored = store.moveTaskDoc(task.id, repoDoc.path, { to: "task" });
+    expect(readFileSync(source, "utf8")).toBe("# Edited in the repository\n");
+    expect(existsSync(repoDoc.path)).toBe(false);
+    expect(existsSync(`${source}${DOC_POINTER_SUFFIX}`)).toBe(false);
+    expect(restored).toMatchObject({
+      path: source,
+      title: registered.title,
+      createdAt: registered.createdAt,
+    });
+    expect(restored.promoted).toBeUndefined();
+    expect(store.listDocsForTask(task.id)).toEqual([restored]);
+  } finally {
+    store.close();
+  }
+});
+
+test("moving back refuses a task-storage collision without changing either file", () => {
+  const { store, task, docsDir } = seedTask();
+  const source = join(docsDir, "checkout.prd.md");
+  try {
+    const repoDoc = store.moveTaskDoc(task.id, source, { to: "repo" });
+    writeFileSync(source, "# Different task copy\n");
+    expect(() =>
+      store.moveTaskDoc(task.id, repoDoc.path, { to: "task" }),
+    ).toThrow(/already exists/);
+    expect(readFileSync(source, "utf8")).toBe("# Different task copy\n");
+    expect(readFileSync(repoDoc.path, "utf8")).toBe("# Checkout PRD\n");
+    expect(existsSync(repoDoc.promoted!.pointerPath)).toBe(true);
+  } finally {
+    store.close();
+  }
+});
+
+test("the API moves a repository file back", () => {
+  const { store, task, docsDir } = seedTask();
+  const repoDoc = store.moveTaskDoc(task.id, join(docsDir, "checkout.prd.md"), {
+    to: "repo",
+  });
+  store.close();
+  const response = handleTraceApiRequest(
+    databasePath,
+    "POST",
+    `/api/tasks/${task.slug}/docs/move`,
+    JSON.stringify({ path: repoDoc.path, to: "task" }),
+  )!;
+  expect(response.status).toBe(200);
+  expect(JSON.parse(response.body as string).path).toBe(
+    join(docsDir, "checkout.prd.md"),
+  );
+});
+
+test("a missing repository file cannot be moved back and keeps its pointer", () => {
+  const { store, task, docsDir } = seedTask();
+  try {
+    const doc = store.moveTaskDoc(task.id, "checkout.prd.md", { to: "repo" });
+    unlinkSync(doc.path);
+    expect(() => store.moveTaskDoc(task.id, "checkout.prd.md", { to: "task" })).toThrow(/not found/);
+    expect(existsSync(doc.promoted!.pointerPath)).toBe(true);
+    expect(existsSync(join(docsDir, "checkout.prd.md"))).toBe(false);
+  } finally { store.close(); }
+});
+
+
+test("moving a repository symlink back refuses without breaking the linked file", () => {
+  const { store, task, docsDir } = seedTask();
+  try {
+    const doc = store.moveTaskDoc(task.id, "checkout.prd.md", { to: "repo" });
+    const linkedFile = join(projectRoot, "docs", "linked.md");
+    writeFileSync(linkedFile, "# Linked file\n");
+    unlinkSync(doc.path);
+    symlinkSync("linked.md", doc.path);
+    expect(() => store.moveTaskDoc(task.id, "checkout.prd.md", { to: "task" })).toThrow(/symbolic link/);
+    expect(readFileSync(linkedFile, "utf8")).toBe("# Linked file\n");
+    expect(existsSync(doc.promoted!.pointerPath)).toBe(true);
+    expect(existsSync(join(docsDir, "checkout.prd.md"))).toBe(false);
+  } finally { store.close(); }
 });

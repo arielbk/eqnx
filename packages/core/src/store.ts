@@ -22,7 +22,11 @@ import {
   looksLikeTaskId,
   slugify,
 } from "./slug.ts";
-import { promoteDocFile } from "./doc-pointer.ts";
+import {
+  moveDocToRepo,
+  moveDocToTask,
+  DOC_POINTER_SUFFIX,
+} from "./doc-pointer.ts";
 import {
   listNativeTaskDocs,
   mergeTaskDocs,
@@ -54,7 +58,7 @@ import type {
   ActiveTask,
   AddTaskDocOptions,
   GitWorkContext,
-  PromoteTaskDocOptions,
+  MoveTaskDocOptions,
   Project,
   ProjectMergeResult,
   ProjectResolution,
@@ -1430,26 +1434,73 @@ class NodeSqliteTaskStore implements TaskStore {
     );
   }
 
-  promoteTaskDoc(
+  moveTaskDoc(
     taskId: string,
     path: string,
-    options?: PromoteTaskDocOptions,
+    options: MoveTaskDocOptions,
   ): TaskDoc {
     const task = this.getTaskByRef(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
-    if (!task.projectRoot) {
-      throw new Error(
-        `Task ${task.slug} has no project root to promote docs into`,
-      );
-    }
-
     const docsDir = resolveTaskDocsDir(this.#databasePath, task.slug);
+    if (options.to === "task") {
+      if (options.repoPath !== undefined)
+        throw new Error(
+          "--path is only supported when moving to the repository",
+        );
+      const nativePath = resolve(docsDir, path.trim());
+      const repoPath = task.projectRoot
+        ? resolve(task.projectRoot, path.trim())
+        : undefined;
+      const doc = this.listDocsForTask(task.id).find(
+        (candidate) =>
+          candidate.promoted &&
+          (candidate.path === path.trim() ||
+            candidate.path === repoPath ||
+            candidate.promoted.pointerPath === nativePath ||
+            candidate.promoted.pointerPath ===
+              `${nativePath}${DOC_POINTER_SUFFIX}`),
+      );
+      if (!doc?.promoted)
+        throw new Error(
+          "Document is not a repository file belonging to this task",
+        );
+      if (doc.promoted.otherCheckout)
+        throw new Error("Cannot move a file from another checkout");
+      if (doc.promoted.missing)
+        throw new Error(`Repository file not found: ${doc.path}`);
+      const restoredPath = moveDocToTask({
+        docsDir,
+        pointerPath: doc.promoted.pointerPath,
+        sourcePath: doc.path,
+        projectRoot: resolve(
+          doc.path,
+          ...doc.promoted.repoPath.split("/").map(() => ".."),
+        ),
+      });
+      this.#sqlite
+        .prepare(
+          "UPDATE OR REPLACE task_docs SET path = ? WHERE task_id = ? AND path = ?",
+        )
+        .run(restoredPath, task.id, doc.promoted.pointerPath);
+      const restored = this.listDocsForTask(task.id).find(
+        (candidate) => candidate.path === restoredPath,
+      );
+      if (!restored)
+        throw new Error(`Moved document did not list: ${restoredPath}`);
+      return restored;
+    }
+    if (options.to !== "repo")
+      throw new Error("Destination must be repo or task");
+    if (!task.projectRoot)
+      throw new Error(
+        `Task ${task.slug} has no project root to move docs into`,
+      );
     const docPath = resolve(docsDir, path.trim());
-    const { pointerPath } = promoteDocFile({
+    const { pointerPath } = moveDocToRepo({
       docsDir,
       docPath,
       projectRoot: task.projectRoot,
-      ...(options?.to === undefined ? {} : { to: options.to }),
+      ...(options.repoPath === undefined ? {} : { to: options.repoPath }),
     });
 
     // The metadata row follows the doc to its pointer, which is what lives in
@@ -1464,7 +1515,7 @@ class NodeSqliteTaskStore implements TaskStore {
     const promoted = this.listDocsForTask(task.id).find(
       (doc) => doc.promoted?.pointerPath === pointerPath,
     );
-    if (!promoted) throw new Error(`Promoted doc did not list: ${pointerPath}`);
+    if (!promoted) throw new Error(`Moved document did not list: ${pointerPath}`);
     return promoted;
   }
 

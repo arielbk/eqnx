@@ -183,25 +183,37 @@ export function parseAddDocOptions(flags: string[]): {
   return { title, description };
 }
 
-export function promoteDocUsage(): string {
-  return "Usage: eqnx task promote-doc <ref> <path> [--to <repo-path>]\n\nMoves a task doc into the project repo (default: <repo>/docs/<name>) and leaves a pointer in the task, so the repo file is the one copy. --to is relative to the project root; end it with / to name a directory.";
+export function moveDocUsage(): string {
+  return "Usage: eqnx task move-doc <ref> <path> --to <repo|task> [--path <repo-path>]\n\nMoves a document between task storage and the project repository, keeping its task association. --to repo defaults to <repo>/docs/<name>; --path selects a repository file or directory (end with /). --to task restores the original task filename using the current repository contents and removes the repository file. Existing files are never overwritten.";
 }
 
-export function parsePromoteDocOptions(flags: string[]): { to?: string } {
-  let to: string | undefined;
-  let index = 0;
-  while (index < flags.length) {
+export function parseMoveDocOptions(flags: string[]): {
+  to: "repo" | "task";
+  repoPath?: string;
+} {
+  let to: "repo" | "task" | undefined;
+  let repoPath: string | undefined;
+  for (let index = 0; index < flags.length; index += 2) {
     const flag = flags[index];
-    if (flag === "--to") {
-      const value = flags[index + 1];
-      if (!value) throw new Error(promoteDocUsage());
-      to = value;
-      index += 2;
-    } else {
+    if (flag !== "--to" && flag !== "--path")
       throw new Error(`Unknown option: ${flag}`);
+    const value = flags[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(moveDocUsage());
+    if (flag === "--to") {
+      if (value !== "repo" && value !== "task")
+        throw new Error("--to must be repo or task");
+      if (to !== undefined) throw new Error("--to can only be specified once");
+      to = value;
+    } else {
+      if (repoPath !== undefined)
+        throw new Error("--path can only be specified once");
+      repoPath = value;
     }
   }
-  return to === undefined ? {} : { to };
+  if (!to) throw new Error(moveDocUsage());
+  if (to === "task" && repoPath !== undefined)
+    throw new Error("--path is only supported with --to repo");
+  return { to, ...(repoPath === undefined ? {} : { repoPath }) };
 }
 
 export function updateDocUsage(): string {
@@ -359,7 +371,10 @@ export function sessionActiveTaskUsage(): string {
   return "Usage: eqnx session active-task --id <session-id> [--project <slug|dir>]";
 }
 
-export function parseSessionActiveTaskArgs(args: string[]): { id: string; project?: string } {
+export function parseSessionActiveTaskArgs(args: string[]): {
+  id: string;
+  project?: string;
+} {
   let id: string | undefined;
   let project: string | undefined;
 
@@ -616,7 +631,10 @@ export function parseRecallCandidatesArgs(args: string[]): string | undefined {
   return project;
 }
 
-export function parseSkillDocsDirArgs(args: string[]): { id?: string; project?: string } {
+export function parseSkillDocsDirArgs(args: string[]): {
+  id?: string;
+  project?: string;
+} {
   let id: string | undefined;
   let project: string | undefined;
 

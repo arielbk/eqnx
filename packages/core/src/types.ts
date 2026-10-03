@@ -132,9 +132,11 @@ export type PromotedDoc = {
   otherCheckout?: string;
 };
 
-export type PromoteTaskDocOptions = {
-  /** Target relative to the project root; a trailing slash means a directory. Defaults to `docs/`. */
-  to?: string;
+export type MoveTaskDocOptions = {
+  /** The document's destination storage location. */
+  to: "repo" | "task";
+  /** Repository-relative destination for `to: "repo"`; defaults to `docs/<name>`. */
+  repoPath?: string;
 };
 
 // Optional metadata captured alongside a doc registration. Both fields are
@@ -382,10 +384,10 @@ export type TaskStore = {
   ): TaskDoc;
   listDocsForTask(taskId: string): TaskDoc[];
   // Move a task doc into the project repo and leave a pointer in its place.
-  promoteTaskDoc(
+  moveTaskDoc(
     taskId: string,
     path: string,
-    options?: PromoteTaskDocOptions,
+    options: MoveTaskDocOptions,
   ): TaskDoc;
   removeTaskDoc(taskId: string, path: string): void;
   syncSnapshot(): SyncPayload;

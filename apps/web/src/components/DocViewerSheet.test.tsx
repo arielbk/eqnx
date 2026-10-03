@@ -346,16 +346,18 @@ test("reverts the optimistic checkbox flip when the server rejects", async () =>
 test("does not intercept unknown, external, or non-markdown links", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(
-        [
-          '<a href="missing.md">Missing</a>',
-          '<a href="https://example.com/plan.md">External</a>',
-          '<a href="data.json">Data</a>',
-        ].join(" "),
-        { status: 200, headers: { "content-type": "text/html" } },
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          [
+            '<a href="missing.md">Missing</a>',
+            '<a href="https://example.com/plan.md">External</a>',
+            '<a href="data.json">Data</a>',
+          ].join(" "),
+          { status: 200, headers: { "content-type": "text/html" } },
+        ),
       ),
-    ),
   );
   const onNavigateDocRoute = vi.fn();
 
@@ -391,7 +393,7 @@ test("says where a promoted doc lives in the repo", async () => {
 
   expect(await screen.findByRole("heading", { name: "Plan" })).toBeInTheDocument();
   expect(screen.getByTestId("doc-viewer-promoted")).toHaveTextContent(
-    "Lives in the project repo at docs/plan.md",
+    "Repository filedocs/plan.md",
   );
 });
 
@@ -421,7 +423,7 @@ test("a promoted doc read from another checkout says so and never writes a check
   await screen.findByText("First");
 
   expect(screen.getByTestId("doc-viewer-promoted")).toHaveTextContent(
-    "Read from another checkout at /work/.worktrees/other",
+    "Viewing a file from another checkout. Editing is disabled here.",
   );
 
   const [firstBox] = screen.getAllByRole("checkbox") as HTMLInputElement[];
@@ -433,4 +435,83 @@ test("a promoted doc read from another checkout says so and never writes a check
       String(url).includes("/docs/checkbox"),
     ),
   ).toBe(false);
+});
+
+test("code copy stays available after a parent rerenders unchanged document contents", async () => {
+  const write = stubClipboard();
+  const fetchMock = vi.fn().mockImplementation(() =>
+    Promise.resolve(
+      new Response("<h1>Plan</h1><pre><code>echo hello\n</code></pre>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const client = makeQueryClient();
+  const triggerRef = createRef<HTMLElement>();
+  const sheet = (onOpenChange: (open: boolean) => void) => (
+    <QueryClientProvider client={client}>
+      <DocViewerSheet
+        taskRef="my-task"
+        docPath="/work/docs/plan.md"
+        triggerRef={triggerRef}
+        onOpenChange={onOpenChange}
+      />
+    </QueryClientProvider>
+  );
+  const view = render(sheet(() => {}));
+  await screen.findByRole("button", { name: "Copy code" });
+  const fetchCount = fetchMock.mock.calls.length;
+
+  // Timeline refreshes rerender the sheet even when the cached HTML is unchanged.
+  view.rerender(sheet(() => {}));
+  expect(fetchMock).toHaveBeenCalledTimes(fetchCount);
+  fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+  expect(write).toHaveBeenCalledWith("echo hello\n");
+});
+
+test("moves a repository document into task storage and follows its new path", async () => {
+  const onMoved = vi.fn();
+  const fetchMock = vi
+    .fn()
+    .mockImplementation((url: string) =>
+      url.endsWith("/docs/move")
+        ? Promise.resolve(
+            new Response(JSON.stringify({ path: "/store/docs/spec.md" }), {
+              headers: { "content-type": "application/json" },
+            }),
+          )
+        : Promise.resolve(
+            new Response("<h1>Specification</h1>", {
+              headers: { "content-type": "text/html" },
+            }),
+          ),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <QueryClientProvider client={makeQueryClient()}>
+      <DocViewerSheet
+        taskRef="my-task"
+        docPath="/repo/docs/spec.md"
+        promoted={{ repoPath: "docs/spec.md", missing: false }}
+        onMoved={onMoved}
+        triggerRef={createRef<HTMLElement>()}
+        onOpenChange={() => {}}
+      />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Move to task storage" }),
+  );
+  await vi.waitFor(() =>
+    expect(onMoved).toHaveBeenCalledWith("/store/docs/spec.md"),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/tasks/my-task/docs/move",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ path: "/repo/docs/spec.md", to: "task" }),
+    }),
+  );
 });

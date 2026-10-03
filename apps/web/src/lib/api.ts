@@ -589,6 +589,47 @@ export function useArchiveTask() {
   });
 }
 
+export function useMoveDoc() {
+  const qc = useQueryClient();
+  const source = useTraceDataSource();
+  return useMutation({
+    mutationFn: async ({
+      ref,
+      path,
+      to,
+    }: {
+      ref: string;
+      path: string;
+      to: "repo" | "task";
+    }) => {
+      const response = await source.request(
+        `/api/tasks/${encodeURIComponent(ref)}/docs/move`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path, to }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          (await response.text()) || "Could not move the document",
+        );
+      return response.json() as Promise<{ path: string }>;
+    },
+    onSuccess: async (_doc, { ref }) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: traceQueryKey(source, "tasks") }),
+        qc.invalidateQueries({
+          queryKey: traceQueryKey(source, "task-timeline", ref),
+        }),
+        qc.invalidateQueries({
+          queryKey: traceQueryKey(source, "doc-contents", ref),
+        }),
+      ]);
+    },
+  });
+}
+
 export function useToggleCheckbox() {
   const qc = useQueryClient();
   const source = useTraceDataSource();

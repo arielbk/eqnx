@@ -30,7 +30,7 @@ export function ArchiveSuggestionChip({
     >
       <button
         type="button"
-        className="inline-flex items-center gap-1 border-0 bg-transparent px-1.5 py-px text-inherit cursor-pointer rounded-l hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+        className="inline-flex items-baseline [&>svg]:self-center gap-1 border-0 bg-transparent px-1.5 py-px text-inherit cursor-pointer rounded-l hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
         aria-label={`Archive ${taskLabel} (looks done)`}
         title="This task's state says it is done. Archive it?"
         onClick={onArchive}

@@ -189,7 +189,7 @@ export type { DocFingerprintInput, ProseStamp } from "./prose-fingerprint.ts";
 export type {
   ActiveTask,
   AddTaskDocOptions,
-  PromoteTaskDocOptions,
+  MoveTaskDocOptions,
   ContextTokens,
   GitWorkContext,
   LastWorkedOn,
